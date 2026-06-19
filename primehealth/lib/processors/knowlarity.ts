@@ -43,6 +43,7 @@ export async function processKnowlarityWebhook(payload: any): Promise<void> {
     const nowIso = now.toISOString()
 
     const rawCallerPhone =
+      payload?.caller_number ??
       payload?.caller_phone ??
       payload?.caller ??
       payload?.from ??
@@ -51,6 +52,7 @@ export async function processKnowlarityWebhook(payload: any): Promise<void> {
       ''
 
     const rawVirtualNumber =
+      payload?.called_number ??
       payload?.virtual_number ??
       payload?.virtualNumber ??
       payload?.to ??
@@ -86,10 +88,30 @@ export async function processKnowlarityWebhook(payload: any): Promise<void> {
     }
 
     const callStatus = resolveCallStatus(payload)
-    const knowlarityCallId = payload?.knowlarity_call_id ?? payload?.call_id ?? payload?.callId ?? null
-    const callSid = payload?.call_sid ?? payload?.CallSid ?? payload?.callSid ?? ''
+    const knowlarityCallId = payload?.knowlarity_call_id ?? payload?.call_id ?? payload?.callId ?? payload?.call_uuid ?? null
+    const callSid = payload?.call_uuid ?? payload?.call_sid ?? payload?.CallSid ?? payload?.callSid ?? ''
     const dialWhomNumber = payload?.dial_whom_number ?? payload?.DialWhomNumber ?? null
     const recordingUrl = payload?.recording_url ?? payload?.RecordingUrl ?? null
+    const duration = payload?.caller_duration ? parseInt(String(payload.caller_duration)) : null
+    const agentNumber = payload?.agent_number ?? null
+    const callTransferStatus = payload?.call_transfer_status ?? null
+    const direction = String(payload?.call_direction ?? 'inbound').toLowerCase() === 'outbound' ? 'outbound' : 'inbound'
+
+    // Reconstruct actual call start time if possible (defaults to now)
+    let callStartedAt = nowIso
+    if (payload?.call_date && payload?.call_time) {
+      try {
+        const datePart = String(payload.call_date).trim()
+        const timePart = String(payload.call_time).trim()
+        // Assuming dates are logged in IST (+05:30)
+        const parsedDate = new Date(`${datePart}T${timePart}+05:30`)
+        if (!isNaN(parsedDate.getTime())) {
+          callStartedAt = parsedDate.toISOString()
+        }
+      } catch (err) {
+        console.warn('Failed to parse call_date and call_time:', err)
+      }
+    }
 
     const { data: newCall, error: callError } = await supabase
       .from('calls')
@@ -99,15 +121,17 @@ export async function processKnowlarityWebhook(payload: any): Promise<void> {
         clinic_number_id: clinicNumber?.id ?? null,
         service_type: clinicNumber?.service_name ?? null,
         call_status: callStatus,
-        call_direction: 'inbound',
+        call_direction: direction,
         virtual_number: virtualNumber,
         knowlarity_call_id: knowlarityCallId,
         call_sid: callSid,
         dial_whom_number: dialWhomNumber,
         recording_url: recordingUrl,
-        call_started_at: nowIso,
+        call_started_at: callStartedAt,
         raw_payload: payload,
-        exotel_call_sid: callSid,
+        call_duration: duration,
+        agent_number: agentNumber,
+        call_transfer_status: callTransferStatus,
         incoming_number: virtualNumber,
         patient_name: patient.full_name ?? payload?.patient_name ?? payload?.caller_name ?? 'New Patient',
       })
@@ -134,9 +158,9 @@ export async function processKnowlarityWebhook(payload: any): Promise<void> {
         patient_name: patientName,
         incoming_number: virtualNumber,
         service_type: clinicNumber?.service_name ?? null,
-        missed_at: nowIso,
+        missed_at: callStartedAt,
         status: 'pending',
-        send_after: nowIso,
+        send_after: callStartedAt,
       })
       .select('id')
       .single()
@@ -145,8 +169,18 @@ export async function processKnowlarityWebhook(payload: any): Promise<void> {
       throw missedCallError || new Error('Failed to insert missed call record')
     }
 
-    const todayMidnightUTC = new Date()
-    todayMidnightUTC.setUTCHours(0, 0, 0, 0)
+    // IST midnight boundary calculation
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Kolkata',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    })
+    const parts = formatter.formatToParts(now)
+    const yearStr = parts.find(p => p.type === 'year')?.value
+    const monthStr = parts.find(p => p.type === 'month')?.value
+    const dayStr = parts.find(p => p.type === 'day')?.value
+    const todayMidnightUTC = new Date(`${yearStr}-${monthStr}-${dayStr}T00:00:00+05:30`)
 
     const serviceType = clinicNumber?.service_name ?? 'General'
 
@@ -156,6 +190,7 @@ export async function processKnowlarityWebhook(payload: any): Promise<void> {
       .eq('patient_id', patient.id)
       .not('whatsapp_sent_at', 'is', null)
       .gte('whatsapp_sent_at', todayMidnightUTC.toISOString())
+      .neq('id', missedCall.id)
       .limit(1)
       .maybeSingle()
 
@@ -171,13 +206,11 @@ export async function processKnowlarityWebhook(payload: any): Promise<void> {
         missedCallId: missedCall.id,
       })
     } else {
-      // If already sent today, mark as sent so the cron job doesn't pick it up
+      // If already sent today, write staff notes and skip sending
       const { error: updateError } = await supabase
         .from('missed_calls')
         .update({
-          status: 'whatsapp_sent',
-          whatsapp_sent_at: nowIso,
-          staff_notes: 'Auto-skipped WhatsApp (already sent today)'
+          staff_notes: 'Auto-skipped: WhatsApp already sent today'
         })
         .eq('id', missedCall.id)
 

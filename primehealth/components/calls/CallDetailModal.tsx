@@ -42,7 +42,7 @@ export function CallDetailModal({ isOpen, onClose, call }: CallDetailModalProps)
           <div className="flex flex-col gap-0.5">
             <span className="text-[10px] text-slate-400 dark:text-slate-500 font-extrabold uppercase tracking-wider">Call ID Reference</span>
             <span className="font-bold text-slate-700 dark:text-slate-300 text-xs truncate max-w-[200px]">
-              {call.exotel_call_sid}
+              {call.call_sid}
             </span>
           </div>
           <Badge variant={getCallStatusVariant(call.call_status)}>

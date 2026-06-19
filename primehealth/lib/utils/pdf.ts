@@ -195,7 +195,7 @@ export async function generateConsentPDF(data: ConsentPDFData): Promise<Uint8Arr
   })
   
   currentY -= 15
-  signatureSectionPage.drawText('Status: Digitally Signed & OTP Verified via Twilio Verify', {
+  signatureSectionPage.drawText('Status: Digitally Signed', {
     x: margin,
     y: currentY,
     size: 8.5,

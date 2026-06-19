@@ -1,16 +1,8 @@
 {
   "crons": [
     {
-      "path": "/api/cron/process-missed-calls",
-      "schedule": "*/5 * * * *"
-    },
-    {
-      "path": "/api/cron/process-webhooks",
-      "schedule": "* * * * *"
-    },
-    {
       "path": "/api/cron/check-forwarding-health",
-      "schedule": "0 3 * * *"
+      "schedule": "30 21 * * *"
     }
   ]
 }

@@ -181,7 +181,7 @@ async function runSeed() {
     }
 
     // 8. Seed Call Logs & Missed Call recovery queue
-    console.log('\n☎️ Seeding incoming Exotel calls & missed call queues...')
+    console.log('\n☎️ Seeding incoming calls & missed call queues...')
     const { data: existingCalls } = await supabase.from('calls').select('*')
     if (existingCalls && existingCalls.length > 0) {
       console.log('✅ Call logs already populated.')
@@ -196,7 +196,7 @@ async function runSeed() {
           patient_phone: patientA.phone,
           patient_id: patientA.id,
           patient_name: patientA.full_name,
-          exotel_call_sid: `ex_sid_${Date.now()}_A`,
+          call_sid: `ex_sid_${Date.now()}_A`,
           incoming_number: '+918000000002',
           service_type: 'Skin Care',
           call_status: 'missed',
@@ -208,7 +208,7 @@ async function runSeed() {
           patient_phone: patientB.phone,
           patient_id: patientB.id,
           patient_name: patientB.full_name,
-          exotel_call_sid: `ex_sid_${Date.now()}_B`,
+          call_sid: `ex_sid_${Date.now()}_B`,
           incoming_number: '+918000000001',
           service_type: 'Hair Care',
           call_status: 'answered',
@@ -222,7 +222,7 @@ async function runSeed() {
           patient_phone: patientC.phone,
           patient_id: patientC.id,
           patient_name: patientC.full_name,
-          exotel_call_sid: `ex_sid_${Date.now()}_C`,
+          call_sid: `ex_sid_${Date.now()}_C`,
           incoming_number: '+918000000003',
           service_type: 'General',
           call_status: 'missed',

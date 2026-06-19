@@ -41,7 +41,7 @@ CREATE TABLE public.calls (
   patient_id uuid,
   patient_phone text NOT NULL,
   patient_name text,
-  exotel_call_sid text NOT NULL UNIQUE,
+  call_sid text NOT NULL UNIQUE,
   incoming_number text NOT NULL,
   clinic_number_id uuid,
   service_type text,
@@ -59,7 +59,8 @@ CREATE TABLE public.calls (
   raw_payload jsonb,
   virtual_number text,
   knowlarity_call_id text,
-  call_sid text,
+  agent_number text,
+  call_transfer_status text,
   CONSTRAINT calls_pkey PRIMARY KEY (id),
   CONSTRAINT calls_patient_id_fkey FOREIGN KEY (patient_id) REFERENCES public.patients(id),
   CONSTRAINT calls_clinic_number_id_fkey FOREIGN KEY (clinic_number_id) REFERENCES public.clinic_numbers(id),
@@ -161,18 +162,6 @@ CREATE TABLE public.patient_photos (
   CONSTRAINT patient_photos_pkey PRIMARY KEY (id),
   CONSTRAINT patient_photos_patient_id_fkey FOREIGN KEY (patient_id) REFERENCES public.patients(id),
   CONSTRAINT patient_photos_taken_by_staff_id_fkey FOREIGN KEY (taken_by_staff_id) REFERENCES public.profiles(id)
-);
-CREATE TABLE public.otp_codes (
-  id uuid NOT NULL DEFAULT uuid_generate_v4(),
-  phone text NOT NULL,
-  patient_id uuid,
-  code text NOT NULL,
-  expires_at timestamp with time zone NOT NULL,
-  used boolean DEFAULT false,
-  created_at timestamp with time zone DEFAULT now(),
-  purpose text DEFAULT 'consent'::text CHECK (purpose = ANY (ARRAY['consent'::text, 'whatsapp_verify'::text])),
-  CONSTRAINT otp_codes_pkey PRIMARY KEY (id),
-  CONSTRAINT otp_codes_patient_id_fkey FOREIGN KEY (patient_id) REFERENCES public.patients(id)
 );
 CREATE TABLE public.webhook_queue (
   id uuid NOT NULL DEFAULT gen_random_uuid(),

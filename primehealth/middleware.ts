@@ -29,7 +29,11 @@ export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname
 
   if (pathname === '/api/knowlarity/webhook') {
-    const token = request.nextUrl.searchParams.get('token')
+    const token =
+      request.nextUrl.searchParams.get('token') ||
+      request.headers.get('x-api-key') ||
+      request.headers.get('x-webhook-secret') ||
+      request.headers.get('authorization')?.replace('Bearer ', '')
     if (token !== process.env.KNOWLARITY_WEBHOOK_SECRET) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
@@ -44,9 +48,7 @@ export async function middleware(request: NextRequest) {
     return supabaseResponse
   }
 
-  const isPublicApi =
-    pathname === '/api/exotel/webhook' ||
-    pathname === '/api/whatsapp/webhook'
+  const isPublicApi = pathname === '/api/whatsapp/webhook'
 
   const isPublicPage = pathname.startsWith('/login')
 

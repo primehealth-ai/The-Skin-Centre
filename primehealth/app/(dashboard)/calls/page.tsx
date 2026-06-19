@@ -142,7 +142,7 @@ function exportToCSV(calls: Call[]) {
   ]
 
   const rows = calls.map((c) => [
-    c.exotel_call_sid ?? '',
+    c.call_sid ?? '',
     c.patient_name ?? '',
     c.patient_phone ?? '',
     c.incoming_number ?? '',
@@ -457,7 +457,7 @@ export default function CallsPage() {
             Call Logs
           </h1>
           <p className="mt-1 text-xs font-semibold text-slate-500 dark:text-slate-400">
-            Inbound &amp; outbound calls routed through Airtel → Exotel ExoPhone
+            Inbound &amp; outbound calls routed through Airtel → Knowlarity
           </p>
         </div>
 

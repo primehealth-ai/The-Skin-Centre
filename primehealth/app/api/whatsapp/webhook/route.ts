@@ -28,7 +28,7 @@ export async function GET(request: Request) {
 
   if (
     mode === 'subscribe' &&
-    verifyToken === process.env.WHATSAPP_VERIFY_TOKEN
+    (verifyToken === process.env.META_WEBHOOK_VERIFY_TOKEN || verifyToken === process.env.WHATSAPP_VERIFY_TOKEN)
   ) {
     return new Response(challenge, { status: 200 })
   }

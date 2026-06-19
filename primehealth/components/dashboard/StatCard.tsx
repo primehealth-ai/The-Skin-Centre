@@ -25,6 +25,14 @@ const borderHighlight = {
   orange: 'border-t-2 border-amber-500/80',
 }
 
+const glowMap = {
+  blue: 'from-blue-400/20 to-blue-600/5 dark:from-blue-500/20 dark:to-blue-600/5',
+  red: 'from-rose-400/20 to-rose-600/5 dark:from-rose-500/20 dark:to-rose-600/5',
+  green: 'from-emerald-400/20 to-emerald-600/5 dark:from-emerald-500/20 dark:to-emerald-600/5',
+  purple: 'from-indigo-400/20 to-indigo-600/5 dark:from-indigo-500/20 dark:to-indigo-600/5',
+  orange: 'from-amber-400/20 to-amber-600/5 dark:from-amber-500/20 dark:to-amber-600/5',
+}
+
 export default function StatCard({
   title, value, icon: Icon,
   trend, trendUp, color
@@ -32,7 +40,7 @@ export default function StatCard({
   return (
     <div className={`relative overflow-hidden bg-white/95 dark:bg-slate-900/90 backdrop-blur-xs rounded-2xl p-6 shadow-sm border border-slate-200/60 dark:border-slate-800/80 hover:-translate-y-1 hover:shadow-md hover:border-slate-300 dark:hover:border-slate-700 transition-all duration-300 ease-out group ${borderHighlight[color]}`}>
       {/* Decorative background glow blob */}
-      <div className="absolute -right-6 -bottom-6 w-24 h-24 bg-gradient-to-br from-slate-100 to-slate-200/10 dark:from-slate-850 dark:to-slate-900/10 rounded-full blur-xl pointer-events-none group-hover:scale-125 transition-transform duration-500" />
+      <div className={`absolute -right-6 -bottom-6 w-24 h-24 bg-gradient-to-br rounded-full blur-xl pointer-events-none group-hover:scale-125 transition-transform duration-500 ${glowMap[color]}`} />
       
       <div className="relative z-10 flex items-start justify-between">
         <div className="space-y-1.5">

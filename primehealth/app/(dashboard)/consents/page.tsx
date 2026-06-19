@@ -11,6 +11,7 @@ import {
   Plus,
   CheckCircle,
   AlertCircle,
+  Loader2,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import type { Database } from '@/types/database'
@@ -23,16 +24,6 @@ type Patient = Database['public']['Tables']['patients']['Row']
 
 interface ConsentWithPatient extends PatientConsent {
   patient: Pick<Patient, 'id' | 'full_name' | 'phone'> | null
-}
-
-interface ConsentSubmitPayload {
-  patientId: string
-  treatment: string
-  consentText: string
-  otpCode: string
-  signatureDataUrl: string
-  witnessSignatureDataUrl?: string
-  checkedRisks: string[]
 }
 
 type Tab = 'list' | 'new'
@@ -80,6 +71,26 @@ function ConsentRow({ consent }: { consent: ConsentWithPatient }) {
   const patientPhone = consent.patient?.phone ?? '—'
   const isVerified = consent.verified_via_otp
   const signedAt = formatIST(consent.signed_at ?? consent.created_at)
+  const [downloading, setDownloading] = useState(false)
+
+  const handleDownload = async () => {
+    if (downloading) return
+    try {
+      setDownloading(true)
+      const res = await fetch(`/api/consents/${consent.id}/pdf-url`)
+      const data = (await res.json()) as { url?: string; error?: string }
+      if (res.ok && data.url) {
+        window.open(data.url, '_blank', 'noopener,noreferrer')
+      } else {
+        alert(data.error || 'Failed to get signed PDF URL')
+      }
+    } catch (err) {
+      console.error(err)
+      alert('Error fetching PDF URL')
+    } finally {
+      setDownloading(false)
+    }
+  }
 
   return (
     <div className="group relative flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 px-5 py-4 bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800/80 rounded-2xl shadow-sm hover:-translate-y-0.5 hover:shadow-md transition-all duration-300 overflow-hidden">
@@ -129,15 +140,19 @@ function ConsentRow({ consent }: { consent: ConsentWithPatient }) {
       {/* Download PDF */}
       <div className="shrink-0">
         {consent.pdf_url ? (
-          <a
-            href={consent.pdf_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white text-xs font-bold shadow-sm transition-all duration-200"
+          <button
+            type="button"
+            onClick={() => { void handleDownload() }}
+            disabled={downloading}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white text-xs font-bold shadow-sm transition-all duration-200 disabled:opacity-50"
           >
-            <Download className="h-3.5 w-3.5" />
+            {downloading ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Download className="h-3.5 w-3.5" />
+            )}
             Download PDF
-          </a>
+          </button>
         ) : (
           <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-400 text-xs font-semibold cursor-not-allowed select-none">
             <Download className="h-3.5 w-3.5" />
@@ -267,86 +282,7 @@ function AllConsentsTab() {
 // ─── New Consent Tab ──────────────────────────────────────────────────────────
 
 function NewConsentTab({ onSuccess }: { onSuccess: () => void }) {
-  const [patients, setPatients] = useState<Patient[]>([])
-  const [loadingPatients, setLoadingPatients] = useState(true)
-  const [patientsError, setPatientsError] = useState<string | null>(null)
-  const supabaseRef = useRef(createClient())
-
-  useEffect(() => {
-    const fetchPatients = async () => {
-      try {
-        const { data, error } = await supabaseRef.current
-          .from('patients')
-          .select('*')
-          .eq('is_active', true)
-          .order('full_name', { ascending: true })
-
-        if (error) throw error
-        setPatients(data ?? [])
-      } catch (err: unknown) {
-        setPatientsError(
-          err instanceof Error ? err.message : 'Failed to load patients'
-        )
-      } finally {
-        setLoadingPatients(false)
-      }
-    }
-
-    void fetchPatients()
-  }, [])
-
-  const handleConsentSubmit = async (payload: ConsentSubmitPayload) => {
-    const selectedPatient = patients.find((p) => p.id === payload.patientId)
-    if (!selectedPatient) throw new Error('Selected patient not found')
-
-    const res = await fetch('/api/consent/verify', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        phone: selectedPatient.phone,
-        code: payload.otpCode,
-        patientId: payload.patientId,
-        treatment: payload.treatment,
-        consentText: payload.consentText,
-        signatureDataUrl: payload.signatureDataUrl,
-        checkedRisks: payload.checkedRisks,
-      }),
-    })
-
-    if (!res.ok) {
-      const errorData = (await res.json()) as { error?: string }
-      throw new Error(errorData.error ?? 'Consent verification failed')
-    }
-
-    onSuccess()
-  }
-
-  if (loadingPatients) {
-    return (
-      <div className="flex flex-col gap-4 max-w-xl mx-auto animate-pulse">
-        <div className="h-64 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800/80" />
-      </div>
-    )
-  }
-
-  if (patientsError) {
-    return (
-      <div className="flex flex-col items-center justify-center py-16 text-center">
-        <AlertCircle className="h-8 w-8 text-rose-500 mb-3" />
-        <p className="text-sm font-extrabold text-slate-800 dark:text-slate-100 mb-1">
-          Failed to load patients
-        </p>
-        <p className="text-xs font-semibold text-slate-400">{patientsError}</p>
-      </div>
-    )
-  }
-
-  return (
-    <ConsentForm
-      patients={patients}
-      onSubmit={handleConsentSubmit}
-    />
-  )
+  return <ConsentForm onSuccess={onSuccess} />
 }
 
 // ─── Tab Navigation ───────────────────────────────────────────────────────────
@@ -396,10 +332,10 @@ function ConsentsPageInner() {
   const [activeTab, setActiveTab] = useState<Tab>(initialTab)
   const [refreshKey, setRefreshKey] = useState(0)
 
-  const handleNewConsentSuccess = () => {
+  const handleNewConsentSuccess = useCallback(() => {
     setActiveTab('list')
     setRefreshKey((k) => k + 1)
-  }
+  }, [])
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 p-4 sm:p-6 lg:p-8">

@@ -1,7 +1,15 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { logError } from '@/lib/utils/logError'
 
+export async function GET() {
+  return checkForwardingHealth()
+}
+
 export async function POST() {
+  return checkForwardingHealth()
+}
+
+async function checkForwardingHealth() {
   try {
     const supabase = createServiceClient() as any
     const checkedAt = new Date()

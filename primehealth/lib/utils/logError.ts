@@ -22,17 +22,26 @@ export async function logError(
       const chatId = process.env.TELEGRAM_CHAT_ID
 
       if (botToken && chatId) {
-        await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            chat_id: chatId,
-            text: `🚨 PrimeHealth [${source}]: ${errorMessage}`,
-          }),
-        })
+        try {
+          const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              chat_id: chatId,
+              text: `🚨 PrimeHealth [${source}]: ${errorMessage}`,
+            }),
+          })
+          if (!res.ok) {
+            console.error(`Telegram alert failed with status ${res.status}: ${await res.text()}`)
+          }
+        } catch (teleError) {
+          console.error('Failed to send Telegram alert:', teleError)
+        }
       }
     }
-  } catch {}
+  } catch (dbError) {
+    console.error('Failed to log error to DB:', dbError)
+  }
 }

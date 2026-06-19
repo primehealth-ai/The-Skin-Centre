@@ -114,7 +114,7 @@ export interface Database {
           patient_id: string | null
           patient_phone: string
           patient_name: string | null
-          exotel_call_sid: string
+          call_sid: string
           incoming_number: string
           clinic_number_id: string | null
           service_type: string | null
@@ -127,13 +127,20 @@ export interface Database {
           staff_name: string | null
           created_at: string
           updated_at: string
+          dial_whom_number: string | null
+          recording_url: string | null
+          raw_payload: any
+          virtual_number: string | null
+          knowlarity_call_id: string | null
+          agent_number: string | null
+          call_transfer_status: string | null
         }
         Insert: {
           id?: string
           patient_id?: string | null
           patient_phone: string
           patient_name?: string | null
-          exotel_call_sid: string
+          call_sid: string
           incoming_number: string
           clinic_number_id?: string | null
           service_type?: string | null
@@ -146,13 +153,20 @@ export interface Database {
           staff_name?: string | null
           created_at?: string
           updated_at?: string
+          dial_whom_number?: string | null
+          recording_url?: string | null
+          raw_payload?: any
+          virtual_number?: string | null
+          knowlarity_call_id?: string | null
+          agent_number?: string | null
+          call_transfer_status?: string | null
         }
         Update: {
           id?: string
           patient_id?: string | null
           patient_phone?: string
           patient_name?: string | null
-          exotel_call_sid?: string
+          call_sid?: string
           incoming_number?: string
           clinic_number_id?: string | null
           service_type?: string | null
@@ -165,6 +179,13 @@ export interface Database {
           staff_name?: string | null
           created_at?: string
           updated_at?: string
+          dial_whom_number?: string | null
+          recording_url?: string | null
+          raw_payload?: any
+          virtual_number?: string | null
+          knowlarity_call_id?: string | null
+          agent_number?: string | null
+          call_transfer_status?: string | null
         }
       }
       missed_calls: {
