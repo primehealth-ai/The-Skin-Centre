@@ -118,6 +118,12 @@ export function ConsentForm({ onSuccess }: ConsentFormProps = {}) {
   const [patient, setPatient] = useState<Patient | null>(null)
   const [searchError, setSearchError] = useState<string | null>(null)
 
+  // Inline Patient Creation State
+  const [showCreateInline, setShowCreateInline] = useState(false)
+  const [newPatientName, setNewPatientName] = useState('')
+  const [newPatientPhone, setNewPatientPhone] = useState('')
+  const [createLoading, setCreateLoading] = useState(false)
+
   // Step 2
   const [treatment, setTreatment] = useState('')
   const [consentText, setConsentText] = useState(DEFAULT_CONSENT_TEXT)
@@ -141,6 +147,7 @@ export function ConsentForm({ onSuccess }: ConsentFormProps = {}) {
     setSearchLoading(true)
     setSearchError(null)
     setPatient(null)
+    setShowCreateInline(false)
 
     try {
       // Match last 10 digits to handle country code variants
@@ -154,7 +161,10 @@ export function ConsentForm({ onSuccess }: ConsentFormProps = {}) {
       if (error) throw error
 
       if (!data) {
-        setSearchError('No patient found with that phone number.')
+        setSearchError('No patient found with that phone number. You can register them below.')
+        setShowCreateInline(true)
+        setNewPatientPhone(phoneQuery)
+        setNewPatientName('')
         return
       }
 
@@ -163,6 +173,40 @@ export function ConsentForm({ onSuccess }: ConsentFormProps = {}) {
       setSearchError(err instanceof Error ? err.message : 'Search failed')
     } finally {
       setSearchLoading(false)
+    }
+  }
+
+  const handleCreatePatientInline = async () => {
+    if (!newPatientName.trim() || !newPatientPhone.trim()) {
+      setSearchError('Please enter a name and phone number to create a new patient.')
+      return
+    }
+
+    setCreateLoading(true)
+    setSearchError(null)
+
+    try {
+      const res = await fetch('/api/patients/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fullName: newPatientName.trim(),
+          phone: newPatientPhone.trim(),
+        }),
+      })
+
+      const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to create patient record')
+      }
+
+      setPatient(data.patient as Patient)
+      setShowCreateInline(false)
+      setStep(2) // Proceed automatically
+    } catch (err: unknown) {
+      setSearchError(err instanceof Error ? err.message : 'Creation failed')
+    } finally {
+      setCreateLoading(false)
     }
   }
 
@@ -211,6 +255,9 @@ export function ConsentForm({ onSuccess }: ConsentFormProps = {}) {
     setSubmitError(null)
     setSuccess(false)
     setSavedConsentId(null)
+    setShowCreateInline(false)
+    setNewPatientName('')
+    setNewPatientPhone('')
   }, [])
 
   // ── Success Screen ────────────────────────────────────────────────────────
@@ -322,6 +369,58 @@ export function ConsentForm({ onSuccess }: ConsentFormProps = {}) {
                 </div>
               )}
             </div>
+
+            {showCreateInline && !patient && (
+              <div className="p-4 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl flex flex-col gap-3 animate-in fade-in duration-200">
+                <p className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                  Register New Patient
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase">Full Name</label>
+                    <Input
+                      type="text"
+                      placeholder="e.g. Ayush Kumar"
+                      value={newPatientName}
+                      onChange={(e) => setNewPatientName(e.target.value)}
+                      className="text-xs font-semibold py-1.5"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase">Phone Number</label>
+                    <Input
+                      type="tel"
+                      placeholder="e.g. 9999999999"
+                      value={newPatientPhone}
+                      onChange={(e) => setNewPatientPhone(e.target.value)}
+                      className="text-xs font-semibold py-1.5"
+                    />
+                  </div>
+                </div>
+                <div className="flex justify-end gap-2 mt-1">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      setShowCreateInline(false)
+                      setSearchError(null)
+                    }}
+                    className="text-xs py-1.5 px-3 font-bold"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={() => { void handleCreatePatientInline() }}
+                    disabled={createLoading || !newPatientName.trim() || !newPatientPhone.trim()}
+                    className="text-xs py-1.5 px-4 font-bold animate-in fade-in"
+                  >
+                    {createLoading && <Loader2 className="h-3 w-3 animate-spin mr-1.5" />}
+                    Create &amp; Continue
+                  </Button>
+                </div>
+              </div>
+            )}
 
             {/* Patient Card */}
             {patient && (

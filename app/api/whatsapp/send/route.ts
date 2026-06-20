@@ -41,6 +41,52 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid WhatsApp template name' }, { status: 400 })
     }
 
+    const dbPhone = normalizedPhone.replace(/^\+/, '').replace(/^0/, '')
+
+    // 1. Opt-out check
+    const { data: optedOut, error: optedOutError } = await supabase
+      .from('opted_out_numbers')
+      .select('id')
+      .eq('phone', dbPhone)
+      .maybeSingle()
+
+    if (optedOutError) {
+      console.error('WhatsApp send opt-out check error:', optedOutError.message)
+    }
+
+    if (optedOut) {
+      return NextResponse.json(
+        { error: 'Cannot send WhatsApp message: Recipient has opted out of communications.' },
+        { status: 400 }
+      )
+    }
+
+    // 2. 24h session window gating check for free-form messages
+    if (!templateName) {
+      const { data: latestCall, error: sessionError } = await supabase
+        .from('missed_calls')
+        .select('whatsapp_session_expires_at')
+        .eq('patient_phone', dbPhone)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      if (sessionError) {
+        console.error('WhatsApp send session check error:', sessionError.message)
+      }
+
+      const sessionExpires = latestCall?.whatsapp_session_expires_at
+      const now = new Date()
+      const isSessionActive = sessionExpires && new Date(sessionExpires) > now
+
+      if (!isSessionActive) {
+        return NextResponse.json(
+          { error: 'Free-form messages are blocked: No active 24-hour WhatsApp session window exists for this number.' },
+          { status: 400 }
+        )
+      }
+    }
+
     let messageText = message
     let metaResponse
 

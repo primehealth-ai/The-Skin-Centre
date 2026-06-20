@@ -53,6 +53,7 @@ export default function PhotosPage() {
         .from('patient_photos')
         .select('*')
         .eq('patient_id', patientId)
+        .is('deleted_at', null)
         .order('taken_at', { ascending: false })
       if (e) throw e
       setPhotos(data ?? [])
@@ -147,7 +148,7 @@ export default function PhotosPage() {
                 Loading photos…
               </div>
             ) : activeTab === 'compare' ? (
-              <PhotoComparison photos={photos} />
+              <PhotoComparison photos={photos} onPhotoDeleted={() => { void loadPhotos(selectedPatientId) }} />
             ) : (
               <PhotoUpload
                 patientId={selectedPatientId}

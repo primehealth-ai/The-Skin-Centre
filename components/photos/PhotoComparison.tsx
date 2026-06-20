@@ -16,11 +16,13 @@ import {
   Loader2,
 } from 'lucide-react'
 import type { Database } from '@/types/database'
+import { useAuth } from '@/hooks/useAuth'
 
 type Photo = Database['public']['Tables']['patient_photos']['Row']
 
 interface PhotoComparisonProps {
   photos: Photo[]
+  onPhotoDeleted?: () => void
 }
 
 interface TreatmentGroup {
@@ -60,35 +62,48 @@ function groupByTreatment(photos: Photo[]): TreatmentGroup[] {
 
 // ─── Hook: resolve signed URL for a single photo ──────────────────────────────
 
-function useSignedUrl(photo: Photo | null): { url: string | null; loading: boolean } {
+function useSignedUrl(photo: Photo | null): { url: string | null; loading: boolean; error: string | null } {
   const [url, setUrl] = useState<string | null>(() => (photo ? (urlCache.get(photo.id) ?? null) : null))
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!photo) { setUrl(null); return }
+    if (!photo) { setUrl(null); setError(null); return }
 
     const cached = urlCache.get(photo.id)
-    if (cached) { setUrl(cached); return }
+    if (cached) { setUrl(cached); setError(null); return }
 
     let cancelled = false
     setLoading(true)
+    setError(null)
 
     fetch(`/api/photos/${photo.id}/url`)
-      .then((r) => r.json() as Promise<{ url?: string; error?: string }>)
+      .then((r) => {
+        if (!r.ok) {
+          throw new Error(`Failed to fetch photo (HTTP ${r.status})`)
+        }
+        return r.json() as Promise<{ url?: string; error?: string }>
+      })
       .then((data) => {
         if (cancelled) return
         if (data.url) {
           urlCache.set(photo.id, data.url)
           setUrl(data.url)
+          setError(null)
+        } else {
+          setError(data.error || 'Failed to resolve photo URL')
         }
       })
-      .catch(() => { /* silently fail — img will show broken state */ })
+      .catch((err) => {
+        if (cancelled) return
+        setError(err instanceof Error ? err.message : 'Error resolving photo URL')
+      })
       .finally(() => { if (!cancelled) setLoading(false) })
 
     return () => { cancelled = true }
   }, [photo])
 
-  return { url, loading }
+  return { url, loading, error }
 }
 
 // ─── Signed Image ─────────────────────────────────────────────────────────────
@@ -103,12 +118,21 @@ function SignedImage({
   className?: string
   alt: string
 }) {
-  const { url, loading } = useSignedUrl(photo)
+  const { url, loading, error } = useSignedUrl(photo)
 
   if (loading) {
     return (
       <div className={`flex items-center justify-center bg-slate-100 dark:bg-slate-800 ${className ?? ''}`}>
         <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className={`flex flex-col items-center justify-center p-4 bg-rose-50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/30 rounded-xl text-rose-600 dark:text-rose-400 text-xs font-bold ${className ?? ''}`}>
+        <AlertCircle className="h-6 w-6 text-rose-500 mb-1" />
+        <span className="text-[10px] text-center">{error}</span>
       </div>
     )
   }
@@ -134,8 +158,8 @@ function ComparisonSlider({ beforePhoto, afterPhoto }: { beforePhoto: Photo; aft
   const isDragging = useRef(false)
   const [sliderPos, setSliderPos] = useState(50)
 
-  const { url: beforeUrl, loading: beforeLoading } = useSignedUrl(beforePhoto)
-  const { url: afterUrl,  loading: afterLoading  } = useSignedUrl(afterPhoto)
+  const { url: beforeUrl, loading: beforeLoading, error: beforeError } = useSignedUrl(beforePhoto)
+  const { url: afterUrl,  loading: afterLoading,  error: afterError  } = useSignedUrl(afterPhoto)
 
   const posFromX = useCallback((clientX: number): number => {
     const el = containerRef.current
@@ -153,6 +177,22 @@ function ComparisonSlider({ beforePhoto, afterPhoto }: { beforePhoto: Photo; aft
   }, [posFromX])
 
   const isLoading = beforeLoading || afterLoading
+  const hasError = beforeError || afterError
+
+  if (hasError) {
+    return (
+      <div
+        className="relative w-full flex flex-col items-center justify-center bg-rose-50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/30 rounded-2xl p-6 text-rose-600 dark:text-rose-400 text-xs font-bold"
+        style={{ aspectRatio: '4/3' }}
+      >
+        <AlertCircle className="h-8 w-8 text-rose-500 mb-2" />
+        <p className="text-center font-bold">Failed to load comparison images</p>
+        <p className="text-[10px] text-rose-500/80 font-normal mt-1 max-w-xs text-center">
+          {beforeError || afterError}
+        </p>
+      </div>
+    )
+  }
 
   return (
     <div
@@ -341,7 +381,30 @@ function EmptyState() {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export function PhotoComparison({ photos }: PhotoComparisonProps) {
+export function PhotoComparison({ photos, onPhotoDeleted }: PhotoComparisonProps) {
+  const { profile } = useAuth()
+  const isStaffOrAdmin = profile?.role === 'staff' || profile?.role === 'admin'
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+
+  const handleDeletePhoto = async (photoId: string) => {
+    if (!window.confirm('Are you sure you want to delete this photo?')) return
+    setDeletingId(photoId)
+    try {
+      const res = await fetch(`/api/photos/${photoId}`, {
+        method: 'DELETE',
+      })
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.error || 'Failed to delete photo')
+      }
+      onPhotoDeleted?.()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to delete photo')
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
   const groups = groupByTreatment(photos)
   const [selectedTreatment, setSelectedTreatment] = useState(groups[0]?.treatment ?? '')
   const [activeBeforeId, setActiveBeforeId] = useState<string | null>(null)
@@ -419,15 +482,35 @@ export function PhotoComparison({ photos }: PhotoComparisonProps) {
         {(activeBefore ?? activeAfter) && (
           <div className="flex flex-wrap items-center gap-3">
             {activeBefore && (
-              <div className="flex items-center gap-1.5 text-xs text-slate-500">
+              <div className="flex items-center gap-2 text-xs text-slate-500 bg-slate-50 dark:bg-slate-800/40 px-2.5 py-1 rounded-lg border border-slate-100 dark:border-slate-800">
                 <Calendar className="h-3.5 w-3.5" />
-                Before: <span className="font-semibold text-rose-600 dark:text-rose-400">{formatDate(activeBefore.taken_at)}</span>
+                <span>Before: <span className="font-semibold text-rose-600 dark:text-rose-400">{formatDate(activeBefore.taken_at)}</span></span>
+                {isStaffOrAdmin && (
+                  <button
+                    onClick={() => { void handleDeletePhoto(activeBefore.id) }}
+                    disabled={deletingId === activeBefore.id}
+                    className="text-rose-500 hover:text-rose-700 font-bold ml-1 hover:scale-105 transition-transform disabled:opacity-50"
+                    title="Delete before photo"
+                  >
+                    Delete
+                  </button>
+                )}
               </div>
             )}
             {activeAfter && (
-              <div className="flex items-center gap-1.5 text-xs text-slate-500">
+              <div className="flex items-center gap-2 text-xs text-slate-500 bg-slate-50 dark:bg-slate-800/40 px-2.5 py-1 rounded-lg border border-slate-100 dark:border-slate-800">
                 <Calendar className="h-3.5 w-3.5" />
-                After: <span className="font-semibold text-emerald-600 dark:text-emerald-400">{formatDate(activeAfter.taken_at)}</span>
+                <span>After: <span className="font-semibold text-emerald-600 dark:text-emerald-400">{formatDate(activeAfter.taken_at)}</span></span>
+                {isStaffOrAdmin && (
+                  <button
+                    onClick={() => { void handleDeletePhoto(activeAfter.id) }}
+                    disabled={deletingId === activeAfter.id}
+                    className="text-rose-500 hover:text-rose-700 font-bold ml-1 hover:scale-105 transition-transform disabled:opacity-50"
+                    title="Delete after photo"
+                  >
+                    Delete
+                  </button>
+                )}
               </div>
             )}
             {activeBefore?.body_area && <Badge variant="secondary">{activeBefore.body_area}</Badge>}

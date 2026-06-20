@@ -69,7 +69,6 @@ function SkeletonRow() {
 function ConsentRow({ consent }: { consent: ConsentWithPatient }) {
   const patientName = consent.patient?.full_name ?? 'Unknown Patient'
   const patientPhone = consent.patient?.phone ?? '—'
-  const isVerified = consent.verified_via_otp
   const signedAt = formatIST(consent.signed_at ?? consent.created_at)
   const [downloading, setDownloading] = useState(false)
 
@@ -122,19 +121,12 @@ function ConsentRow({ consent }: { consent: ConsentWithPatient }) {
         </span>
       </div>
 
-      {/* OTP Verification Badge */}
+      {/* Digitally Signed Badge */}
       <div className="shrink-0">
-        {isVerified ? (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-900/40 text-[11px] font-bold">
-            <CheckCircle className="h-3.5 w-3.5" />
-            Verified
-          </span>
-        ) : (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400 border border-amber-100 dark:border-amber-900/40 text-[11px] font-bold">
-            <AlertCircle className="h-3.5 w-3.5" />
-            Pending
-          </span>
-        )}
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-900/40 text-[11px] font-bold">
+          <CheckCircle className="h-3.5 w-3.5" />
+          Digitally signed
+        </span>
       </div>
 
       {/* Download PDF */}
@@ -350,7 +342,7 @@ function ConsentsPageInner() {
               Patient Consents
             </h1>
             <p className="text-sm font-semibold text-slate-400 mt-1 ml-[52px]">
-              Digitally signed, OTP-verified treatment consent records
+              Digitally signed treatment consent records
             </p>
           </div>
 

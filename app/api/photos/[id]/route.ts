@@ -1,6 +1,3 @@
-// Requires 'patient-photos' private bucket in Supabase Storage
-// Bucket must be private — access only via signed URLs
-
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { logError } from '@/lib/utils/logError'
@@ -9,7 +6,7 @@ interface RouteContext {
   params: Promise<{ id: string }>
 }
 
-export async function GET(
+export async function DELETE(
   _req: NextRequest,
   context: RouteContext
 ): Promise<NextResponse> {
@@ -20,7 +17,7 @@ export async function GET(
       return NextResponse.json({ error: 'Photo ID required' }, { status: 400 })
     }
 
-    // 1. Auth & Role check (using user session client)
+    // 1. Auth check (using user session client)
     const userSupabase = await createClient()
     const {
       data: { user },
@@ -31,6 +28,7 @@ export async function GET(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
+    // Role check (staff/admin)
     const { data: profile } = await userSupabase
       .from('profiles')
       .select('role')
@@ -41,42 +39,21 @@ export async function GET(
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
-    // 2. Fetch photo record to get storage path using service client
+    // 2. Perform soft delete using service client
     const supabase = createServiceClient()
-    const { data: photo, error: photoError } = await supabase
+    const { error: updateError } = await supabase
       .from('patient_photos')
-      .select('photo_url')
+      .update({ deleted_at: new Date().toISOString() })
       .eq('id', id)
-      .is('deleted_at', null)
-      .single()
 
-    if (photoError || !photo) {
-      return NextResponse.json({ error: 'Photo not found' }, { status: 404 })
+    if (updateError) {
+      throw updateError
     }
 
-    // 3. Generate signed URL (1 hour expiry)
-    const { data: signedData, error: signedError } = await supabase.storage
-      .from('patient-photos')
-      .createSignedUrl(photo.photo_url, 3600)
-
-    if (signedError || !signedData?.signedUrl) {
-      throw new Error(`Failed to generate signed URL: ${signedError?.message ?? 'Unknown error'}`)
-    }
-
-    return NextResponse.json(
-      { url: signedData.signedUrl },
-      {
-        status: 200,
-        headers: {
-          // Cache for 55 minutes (slightly less than 1hr expiry)
-          'Cache-Control': 'private, max-age=3300',
-        },
-      }
-    )
+    return NextResponse.json({ success: true }, { status: 200 })
   } catch (error: unknown) {
     await logError('photos', error)
     const message = error instanceof Error ? error.message : 'Internal server error'
     return NextResponse.json({ error: message }, { status: 500 })
   }
 }
-

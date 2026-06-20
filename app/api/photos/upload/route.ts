@@ -2,7 +2,7 @@
 // Bucket must be private — access only via signed URLs
 
 import { NextRequest, NextResponse } from 'next/server'
-import { createServiceClient } from '@/lib/supabase/server'
+import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { logError } from '@/lib/utils/logError'
 import sharp from 'sharp'
 
@@ -11,17 +11,29 @@ const MAX_BYTES = 5 * 1024 * 1024 // 5 MB
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
-    const supabase = createServiceClient() as any
-
-    // ── Auth ────────────────────────────────────────────────────────────────
+    // 1. Auth check (using user session client)
+    const userSupabase = await createClient()
     const {
       data: { user },
       error: authError,
-    } = await supabase.auth.getUser()
+    } = await userSupabase.auth.getUser()
 
     if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
+
+    // Role check (staff/admin)
+    const { data: profile } = await userSupabase
+      .from('profiles')
+      .select('role')
+      .eq('id', user.id)
+      .single()
+
+    if (!profile || (profile.role !== 'staff' && profile.role !== 'admin')) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+
+    const supabase = createServiceClient() as any
 
     // ── Parse multipart form ─────────────────────────────────────────────────
     const form = await req.formData()
@@ -67,11 +79,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     let processedBuffer: any = buffer
     if (file.type.startsWith('image/')) {
       try {
-        const image = sharp(buffer)
+        let image = sharp(buffer)
         const metadata = await image.metadata()
 
         if (metadata.width && metadata.height && (metadata.width > 1600 || metadata.height > 1600)) {
-          image.resize({
+          image = image.resize({
             width: 1600,
             height: 1600,
             fit: 'inside',
@@ -80,11 +92,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         }
 
         if (file.type === 'image/png') {
-          image.png({ quality: 80, compressionLevel: 8 })
+          image = image.png({ quality: 80, compressionLevel: 8 })
         } else if (file.type === 'image/webp') {
-          image.webp({ quality: 80 })
+          image = image.webp({ quality: 80 })
         } else {
-          image.jpeg({ quality: 80, progressive: true })
+          image = image.jpeg({ quality: 80, progressive: true })
         }
 
         processedBuffer = await image.toBuffer()

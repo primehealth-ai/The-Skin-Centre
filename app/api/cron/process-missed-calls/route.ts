@@ -58,6 +58,43 @@ We will contact you shortly. Reply here if you need immediate assistance!`
     // 3. Loop through pending recoveries
     for (const mc of pendingQueue) {
       try {
+        const normalizedPhone = mc.patient_phone.replace(/^\+/, '').replace(/^0/, '')
+
+        // 1. Opt-out check
+        const { data: optedOut, error: optedOutError } = await supabase
+          .from('opted_out_numbers')
+          .select('id')
+          .eq('phone', normalizedPhone)
+          .maybeSingle()
+
+        if (optedOutError) {
+          console.error(`Cron opt-out check failed for ${mc.patient_phone}:`, optedOutError.message)
+          continue
+        }
+
+        if (optedOut) {
+          console.warn(`Cron WhatsApp send blocked: ${mc.patient_phone} has opted out.`)
+          await supabase
+            .from('missed_calls')
+            .update({ status: 'lost', staff_notes: 'Automated send blocked: User opted out.' })
+            .eq('id', mc.id)
+          continue
+        }
+
+        // 2. 24h session window gate check
+        const sessionExpiresAt = mc.whatsapp_session_expires_at
+        const now = new Date()
+        const isSessionActive = sessionExpiresAt && new Date(sessionExpiresAt) > now
+
+        if (!isSessionActive) {
+          console.warn(`Cron WhatsApp send blocked: No active 24-hour session window for ${mc.patient_phone}`)
+          await supabase
+            .from('missed_calls')
+            .update({ status: 'lost', staff_notes: 'Automated send blocked: WhatsApp session window expired/inactive.' })
+            .eq('id', mc.id)
+          continue
+        }
+
         // Personalize message text
         const textMessage = baseMessageText
           .replace(/{{patient_name}}/g, mc.patient_name || 'Patient')

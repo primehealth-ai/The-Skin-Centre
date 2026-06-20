@@ -6,11 +6,8 @@ interface RouteContext {
   params: Promise<{ id: string }>
 }
 
-function getBucketName(path: string): string {
-  if (path.startsWith('consents/')) {
-    return 'patient-photos'
-  }
-  return 'consent-signatures'
+function getBucketName(_path: string): string {
+  return 'patient-photos'
 }
 
 export async function GET(
