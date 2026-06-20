@@ -63,17 +63,29 @@ export async function middleware(request: NextRequest) {
 
   if (pathname.startsWith('/api/')) {
     if (!user && !isPublicApi) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      const errorResponse = NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      supabaseResponse.cookies.getAll().forEach((cookie) => {
+        errorResponse.cookies.set(cookie)
+      })
+      return errorResponse
     }
     return supabaseResponse
   }
 
   if (!user && !isPublicPage) {
-    return NextResponse.redirect(new URL('/login', request.url))
+    const redirectResponse = NextResponse.redirect(new URL('/login', request.url))
+    supabaseResponse.cookies.getAll().forEach((cookie) => {
+      redirectResponse.cookies.set(cookie)
+    })
+    return redirectResponse
   }
 
   if (user && isPublicPage) {
-    return NextResponse.redirect(new URL('/dashboard', request.url))
+    const redirectResponse = NextResponse.redirect(new URL('/dashboard', request.url))
+    supabaseResponse.cookies.getAll().forEach((cookie) => {
+      redirectResponse.cookies.set(cookie)
+    })
+    return redirectResponse
   }
 
   return supabaseResponse
