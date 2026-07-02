@@ -100,11 +100,20 @@ export async function processKnowlarityWebhook(payload: any): Promise<void> {
       payload?.did ??
       ''
 
-    // Fix #1: URL-decode %2b-encoded phones, then strip leading +
+    // Bug 1 & 2 fix (confirmed correct):
+    // decodePhone() is applied to BOTH numbers here, BEFORE any lookup or storage.
+    // Execution order:
+    //   1. decodeURIComponent("%2b917026028964")  →  "+917026028964"
+    //   2. .replace(/^\+/, '')                    →  "917026028964"
+    // The + is stripped AFTER URL-decoding, so the exophone lookup receives the
+    // canonical "917XXXXXXXXX" format that matches clinic_numbers.exophone exactly.
+    // Both virtual_number (calls table) and incoming_number (missed_calls table)
+    // are stored from this already-decoded `virtualNumber` variable — never from
+    // the raw URL-encoded payload field.
     const normalizedPhone = decodePhone(String(rawCallerPhone))
     const virtualNumber   = decodePhone(String(rawVirtualNumber))
 
-    // Fix #8: called_number maps to virtual_number → lookup via exophone column
+    // Lookup clinic number using the decoded exophone — matches "917XXXXXXXXX" format
     const { data: clinicNumber } = await supabase
       .from('clinic_numbers')
       .select('id, service_name')
@@ -231,12 +240,19 @@ export async function processKnowlarityWebhook(payload: any): Promise<void> {
     const patientName =
       patient.full_name ?? payload?.patient_name ?? payload?.caller_name ?? 'New Patient'
 
+    // Bug 3 fix (defensive guard):
+    // patient_phone MUST always come from normalizedPhone (the decoded, validated
+    // variable) — never directly from a raw payload field. If normalizedPhone is
+    // somehow empty (malformed payload), default to a recognisable sentinel rather
+    // than storing a raw template string or undefined value.
+    const safePatientPhone = normalizedPhone.trim() !== '' ? normalizedPhone : 'unknown'
+
     const { data: missedCall, error: missedCallError } = await supabase
       .from('missed_calls')
       .insert({
         call_id: newCall.id,
         patient_id: patient.id,
-        patient_phone: normalizedPhone,
+        patient_phone: safePatientPhone,
         patient_name: patientName,
         incoming_number: virtualNumber,
         service_type: clinicNumber?.service_name ?? null,

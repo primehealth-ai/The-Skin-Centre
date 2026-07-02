@@ -41,11 +41,14 @@ async function processWebhooks() {
           .eq('id', job.id)
       } catch (err: unknown) {
         const attemptsUsed = job.attempts ?? 1
+        // Bug 4 fix: String(err) serialises Error objects as "[object Object]".
+        // Extract .message for real Error instances; JSON.stringify for anything else.
+        const errMessage = err instanceof Error ? err.message : JSON.stringify(err)
         await supabase
           .from('webhook_queue')
           .update({
             status: attemptsUsed >= 3 ? 'failed' : 'pending',
-            error: String(err),
+            error: errMessage,
           })
           .eq('id', job.id)
 
