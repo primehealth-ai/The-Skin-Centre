@@ -206,7 +206,7 @@ function StatPill({ label, value, icon, accent }: StatPillProps) {
 function SkeletonRow() {
   return (
     <tr className="animate-pulse">
-      {Array.from({ length: 8 }).map((_, i) => (
+      {Array.from({ length: 9 }).map((_, i) => (
         <td key={i} className="px-6 py-4">
           <div className="h-3 bg-slate-200 dark:bg-slate-800 rounded-full w-full" />
         </td>
@@ -543,7 +543,7 @@ export default function CallsPage() {
                 <table className="w-full border-collapse text-left text-xs">
                   <thead className="bg-slate-50 dark:bg-slate-800/40 text-slate-400 dark:text-slate-500 font-extrabold border-b border-slate-100 dark:border-slate-800">
                     <tr>
-                      {['Type', 'Patient', 'Airtel Inbound', 'Service', 'Started At', 'Duration', 'Status', 'Actions'].map(
+                      {['Type', 'Patient', 'Airtel Inbound', 'Service', 'Started At', 'Duration', 'Status', 'Recording', 'Actions'].map(
                         (h) => (
                           <th key={h} className="px-6 py-3.5">
                             {h}

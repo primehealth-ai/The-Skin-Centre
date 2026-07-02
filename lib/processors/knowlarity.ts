@@ -1,9 +1,33 @@
 import { createServiceClient } from '@/lib/supabase/server'
-import { normalizePhone } from '@/lib/knowlarity/client'
 import { logError } from '@/lib/utils/logError'
 import { sendMissedCallWhatsApp } from '@/lib/whatsapp/send'
 
 type CallStatus = 'answered' | 'missed' | 'no-answer' | 'busy' | 'failed'
+
+/**
+ * Fix #2: normalizeCallStatus()
+ * Maps Knowlarity's human-readable call_status strings to our DB enum values.
+ * Falls back to 'failed' for unknown values — never crashes.
+ */
+function normalizeCallStatus(raw: string): CallStatus {
+  switch (raw.trim()) {
+    case 'Connected':  return 'answered'
+    case 'Missed':     return 'missed'
+    case 'No Answer':  return 'no-answer'
+    case 'Busy':       return 'busy'
+    case 'Failed':     return 'failed'
+    // lower-case aliases (legacy / other providers)
+    case 'answered':   return 'answered'
+    case 'completed':  return 'answered'
+    case 'missed':     return 'missed'
+    case 'no-answer':  return 'no-answer'
+    case 'no answer':  return 'no-answer'
+    case 'no_answer':  return 'no-answer'
+    case 'busy':       return 'busy'
+    case 'failed':     return 'failed'
+    default:           return 'failed'  // safe default — never crash
+  }
+}
 
 function resolveCallStatus(payload: any): CallStatus {
   const rawStatus = String(
@@ -13,27 +37,43 @@ function resolveCallStatus(payload: any): CallStatus {
       payload?.disposition ??
       payload?.CallStatus ??
       ''
-  )
-    .trim()
-    .toLowerCase()
+  ).trim()
 
-  if (rawStatus === 'answered' || rawStatus === 'completed') {
-    return 'answered'
+  return normalizeCallStatus(rawStatus)
+}
+
+/**
+ * Fix #5: Parse "H:MM:SS" or "MM:SS" duration string to total seconds.
+ * Examples: "0:00:15" → 15, "0:01:30" → 90, "1:30" → 90
+ */
+function parseDuration(raw: string | null | undefined): number | null {
+  if (!raw) return null
+  const str = String(raw).trim()
+  if (!str || str.toLowerCase() === 'none') return null
+  const parts = str.split(':').map(Number)
+  if (parts.some(isNaN)) return null
+  if (parts.length === 3) {
+    // H:MM:SS
+    return parts[0] * 3600 + parts[1] * 60 + parts[2]
   }
-
-  if (rawStatus === 'no-answer' || rawStatus === 'no answer' || rawStatus === 'no_answer') {
-    return 'no-answer'
+  if (parts.length === 2) {
+    // MM:SS
+    return parts[0] * 60 + parts[1]
   }
+  // bare seconds
+  return parts[0] ?? null
+}
 
-  if (rawStatus === 'busy') {
-    return 'busy'
+/**
+ * Fix #1: Decode URL-encoded phone numbers (e.g. "%2b917290021407")
+ * then strip leading + so we store as 917XXXXXXXXX format.
+ */
+function decodePhone(raw: string): string {
+  try {
+    return decodeURIComponent(raw).replace(/^\+/, '').replace(/^0/, '').trim()
+  } catch {
+    return raw.replace(/^\+/, '').replace(/^0/, '').trim()
   }
-
-  if (rawStatus === 'failed') {
-    return 'failed'
-  }
-
-  return 'missed'
 }
 
 export async function processKnowlarityWebhook(payload: any): Promise<void> {
@@ -60,13 +100,15 @@ export async function processKnowlarityWebhook(payload: any): Promise<void> {
       payload?.did ??
       ''
 
-    const normalizedPhone = normalizePhone(String(rawCallerPhone))
-    const virtualNumber = normalizePhone(String(rawVirtualNumber))
+    // Fix #1: URL-decode %2b-encoded phones, then strip leading +
+    const normalizedPhone = decodePhone(String(rawCallerPhone))
+    const virtualNumber   = decodePhone(String(rawVirtualNumber))
 
+    // Fix #8: called_number maps to virtual_number → lookup via exophone column
     const { data: clinicNumber } = await supabase
       .from('clinic_numbers')
       .select('id, service_name')
-      .eq('phone_number', virtualNumber)
+      .eq('exophone', virtualNumber)
       .maybeSingle()
 
     const { data: patient, error: patientError } = await supabase
@@ -89,13 +131,35 @@ export async function processKnowlarityWebhook(payload: any): Promise<void> {
 
     const callStatus = resolveCallStatus(payload)
     const knowlarityCallId = payload?.knowlarity_call_id ?? payload?.call_id ?? payload?.callId ?? payload?.call_uuid ?? null
-    const callSid = payload?.call_uuid ?? payload?.call_sid ?? payload?.CallSid ?? payload?.callSid ?? ''
+
+    // Item 19 fix: if all UUID sources are absent, generate a stable fallback rather
+    // than storing an empty string that would UNIQUE-violate on the second empty payload.
+    const rawCallSid = payload?.call_uuid ?? payload?.call_sid ?? payload?.CallSid ?? payload?.callSid ?? ''
+    const callSid: string = rawCallSid.trim() !== '' ? rawCallSid.trim() : crypto.randomUUID()
     const dialWhomNumber = payload?.dial_whom_number ?? payload?.DialWhomNumber ?? null
-    const recordingUrl = payload?.recording_url ?? payload?.RecordingUrl ?? null
-    const duration = payload?.caller_duration ? parseInt(String(payload.caller_duration)) : null
-    const agentNumber = payload?.agent_number ?? null
+
+    // Fix #6: recording_url — treat "None" / "" as null
+    const rawRecordingUrl = payload?.recording_url ?? payload?.RecordingUrl ?? null
+    const recordingUrl =
+      !rawRecordingUrl || String(rawRecordingUrl).trim() === 'None' || String(rawRecordingUrl).trim() === ''
+        ? null
+        : String(rawRecordingUrl).trim()
+
+    // Fix #5: parse H:MM:SS duration string to integer seconds
+    const duration = parseDuration(payload?.caller_duration ?? null)
+
+    // Fix #7: agent_number — treat "False" / "" as null
+    const rawAgentNumber = payload?.agent_number ?? null
+    const agentNumber =
+      !rawAgentNumber || String(rawAgentNumber).trim() === 'False' || String(rawAgentNumber).trim() === ''
+        ? null
+        : String(rawAgentNumber).trim()
+
     const callTransferStatus = payload?.call_transfer_status ?? null
-    const direction = String(payload?.call_direction ?? 'inbound').toLowerCase() === 'outbound' ? 'outbound' : 'inbound'
+
+    // Fix #4: call_direction — "incoming" → "inbound", "outgoing" → "outbound"
+    const rawDirection = String(payload?.call_direction ?? '').trim().toLowerCase()
+    const direction: 'inbound' | 'outbound' = rawDirection === 'outgoing' ? 'outbound' : 'inbound'
 
     // Reconstruct actual call start time if possible (defaults to now)
     let callStartedAt = nowIso
@@ -113,36 +177,54 @@ export async function processKnowlarityWebhook(payload: any): Promise<void> {
       }
     }
 
+    // Critical fix items 3 & 5:
+    // Use upsert on call_sid so that:
+    //   a) A Knowlarity Log Push retry (same call_uuid) never throws a UNIQUE violation.
+    //   b) raw_payload is always written/updated — it will be present even on a retry.
+    // ignoreDuplicates: false means we DO update columns on conflict (merge latest data).
     const { data: newCall, error: callError } = await supabase
       .from('calls')
-      .insert({
-        patient_id: patient.id,
-        patient_phone: normalizedPhone,
-        clinic_number_id: clinicNumber?.id ?? null,
-        service_type: clinicNumber?.service_name ?? null,
-        call_status: callStatus,
-        call_direction: direction,
-        virtual_number: virtualNumber,
-        knowlarity_call_id: knowlarityCallId,
-        call_sid: callSid,
-        dial_whom_number: dialWhomNumber,
-        recording_url: recordingUrl,
-        call_started_at: callStartedAt,
-        raw_payload: payload,
-        call_duration: duration,
-        agent_number: agentNumber,
-        call_transfer_status: callTransferStatus,
-        incoming_number: virtualNumber,
-        patient_name: patient.full_name ?? payload?.patient_name ?? payload?.caller_name ?? 'New Patient',
-      })
+      .upsert(
+        {
+          patient_id: patient.id,
+          patient_phone: normalizedPhone,
+          clinic_number_id: clinicNumber?.id ?? null,
+          service_type: clinicNumber?.service_name ?? null,
+          call_status: callStatus,
+          call_direction: direction,
+          virtual_number: virtualNumber,
+          knowlarity_call_id: knowlarityCallId,
+          call_sid: callSid,
+          dial_whom_number: dialWhomNumber,
+          recording_url: recordingUrl,
+          call_started_at: callStartedAt,
+          raw_payload: payload,
+          call_duration: duration,
+          agent_number: agentNumber,
+          call_transfer_status: callTransferStatus,
+          incoming_number: virtualNumber,
+          patient_name: patient.full_name ?? payload?.patient_name ?? payload?.caller_name ?? 'New Patient',
+        },
+        {
+          onConflict: 'call_sid',
+          ignoreDuplicates: false, // UPDATE existing row — merges latest raw_payload & status
+        }
+      )
       .select('id')
       .single()
 
     if (callError || !newCall) {
-      throw callError || new Error('Failed to insert call record')
+      throw callError || new Error('Failed to upsert call record')
     }
 
-    if (!['missed', 'no-answer', 'busy'].includes(callStatus)) {
+    // Fix #3: missed call detection — check call_transfer_status === "Missed" OR
+    // normalized call_status is "missed" / "no-answer"
+    const isMissedCall =
+      String(callTransferStatus ?? '').trim() === 'Missed' ||
+      callStatus === 'missed' ||
+      callStatus === 'no-answer'
+
+    if (!isMissedCall) {
       return
     }
 

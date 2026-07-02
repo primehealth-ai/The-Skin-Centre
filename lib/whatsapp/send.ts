@@ -23,6 +23,12 @@ function getTemplateName(serviceType: string): string {
 export async function sendMissedCallWhatsApp(
   params: SendMissedCallWhatsAppParams
 ): Promise<void> {
+  const whatsappEnabled = process.env.WHATSAPP_SENDING_ENABLED === 'true'
+  if (!whatsappEnabled) {
+    console.info('WhatsApp sending disabled, skipped')
+    return
+  }
+
   const supabase = createServiceClient() as any
 
   try {

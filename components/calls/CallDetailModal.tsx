@@ -2,6 +2,7 @@
 import { Modal } from '../ui/Modal'
 import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
+import { CallRecordingPlayer } from './CallRecordingPlayer'
 import {
   Calendar,
   Clock,
@@ -9,7 +10,8 @@ import {
   User,
   Activity,
   HeartHandshake,
-  MessageSquare
+  MessageSquare,
+  FileAudio
 } from 'lucide-react'
 import { formatDate, formatDuration, formatPhoneNumber } from '@/lib/utils/formatters'
 import { getCallStatusVariant, getCallStatusLabel } from '@/lib/utils/status'
@@ -112,6 +114,19 @@ export function CallDetailModal({ isOpen, onClose, call }: CallDetailModalProps)
             </div>
           </div>
         </div>
+
+        {/* Call Recording — only renders for staff/admin when a recording exists */}
+        {call.recording_url && (
+          <div className="flex items-start gap-3 p-3 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-xl">
+            <FileAudio className="h-5 w-5 text-blue-500 mt-0.5 shrink-0" />
+            <div className="flex flex-col gap-2 w-full min-w-0">
+              <span className="text-[10px] text-slate-400 dark:text-slate-500 font-extrabold uppercase">
+                Call Recording
+              </span>
+              <CallRecordingPlayer recordingUrl={call.recording_url} variant="full" />
+            </div>
+          </div>
+        )}
 
         {/* Footer Actions */}
         <div className="flex gap-3 justify-end border-t border-slate-100 dark:border-slate-800 pt-4 mt-2">

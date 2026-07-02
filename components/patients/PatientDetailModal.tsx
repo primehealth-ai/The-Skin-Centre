@@ -2,7 +2,7 @@
 import { Modal } from '../ui/Modal'
 import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
-import { Phone, Mail, Calendar, Tag, FileText, Heart } from 'lucide-react'
+import { Phone, Mail, Calendar, Tag, FileText, Heart, Pencil } from 'lucide-react'
 import { formatPhoneNumber } from '@/lib/utils/formatters'
 import { Database } from '@/types/database'
 import { useRouter } from 'next/navigation'
@@ -13,9 +13,10 @@ interface PatientDetailModalProps {
   isOpen: boolean
   onClose: () => void
   patient: Patient | null
+  onEdit?: (patient: Patient) => void
 }
 
-export function PatientDetailModal({ isOpen, onClose, patient }: PatientDetailModalProps) {
+export function PatientDetailModal({ isOpen, onClose, patient, onEdit }: PatientDetailModalProps) {
   const router = useRouter()
 
   if (!patient) return null
@@ -118,6 +119,16 @@ export function PatientDetailModal({ isOpen, onClose, patient }: PatientDetailMo
           <Button variant="outline" onClick={onClose} className="font-bold text-xs py-2 px-4">
             Close
           </Button>
+          {onEdit && (
+            <Button
+              variant="outline"
+              onClick={() => { onClose(); onEdit(patient!) }}
+              className="text-amber-600 border-amber-200 hover:bg-amber-50 dark:border-amber-900/50 dark:text-amber-400 dark:hover:bg-amber-950/20 font-bold text-xs py-2 px-4 inline-flex items-center gap-1.5"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+              Edit Patient
+            </Button>
+          )}
           <Button variant="outline" onClick={handleCreateConsent} className="text-blue-600 border-blue-200 hover:bg-blue-50 dark:border-blue-900/50 dark:hover:bg-blue-950/20 font-bold text-xs py-2 px-4">
             Create Consent Form
           </Button>

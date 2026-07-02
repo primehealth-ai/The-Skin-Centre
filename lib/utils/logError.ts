@@ -7,7 +7,21 @@ export async function logError(
 ): Promise<void> {
   try {
     const supabase = createServiceClient()
-    const errorMessage = String(error)
+    let errorMessage = ''
+    if (error && typeof error === 'object') {
+      const err = error as Record<string, unknown>
+      if (typeof err.message === 'string') {
+        errorMessage = err.message
+      } else {
+        try {
+          errorMessage = JSON.stringify(err)
+        } catch {
+          errorMessage = String(error)
+        }
+      }
+    } else {
+      errorMessage = String(error)
+    }
     const stack = error instanceof Error ? error.stack ?? null : null
 
     await supabase.from('error_logs').insert({

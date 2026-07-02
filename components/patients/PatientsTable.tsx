@@ -2,7 +2,7 @@
 import { useState } from 'react'
 import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
-import { Search, UserPlus, Eye, Tag } from 'lucide-react'
+import { Search, UserPlus, Eye, Tag, Pencil } from 'lucide-react'
 import { formatPhoneNumber } from '@/lib/utils/formatters'
 import { Database } from '@/types/database'
 
@@ -11,10 +11,11 @@ type Patient = Database['public']['Tables']['patients']['Row']
 interface PatientsTableProps {
   patients: Patient[]
   onViewDetails: (patient: Patient) => void
+  onEditPatient?: (patient: Patient) => void
   onAddPatient?: () => void
 }
 
-export function PatientsTable({ patients, onViewDetails, onAddPatient }: PatientsTableProps) {
+export function PatientsTable({ patients, onViewDetails, onEditPatient, onAddPatient }: PatientsTableProps) {
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedTag, setSelectedTag] = useState<string>('all')
   const [currentPage, setCurrentPage] = useState(1)
@@ -153,15 +154,28 @@ export function PatientsTable({ patients, onViewDetails, onAddPatient }: Patient
                       })}
                     </td>
                     <td className="px-6 py-4 text-right">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => onViewDetails(patient)}
-                        className="inline-flex items-center gap-1.5 font-bold text-xs py-1.5"
-                      >
-                        <Eye className="h-3.5 w-3.5" />
-                        View Profile
-                      </Button>
+                      <div className="inline-flex items-center gap-2">
+                        {onEditPatient && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => onEditPatient(patient)}
+                            className="inline-flex items-center gap-1.5 font-bold text-xs py-1.5 text-amber-600 border-amber-200 hover:bg-amber-50 dark:border-amber-900/50 dark:text-amber-400 dark:hover:bg-amber-950/20"
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                            Edit
+                          </Button>
+                        )}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => onViewDetails(patient)}
+                          className="inline-flex items-center gap-1.5 font-bold text-xs py-1.5"
+                        >
+                          <Eye className="h-3.5 w-3.5" />
+                          View
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 ))

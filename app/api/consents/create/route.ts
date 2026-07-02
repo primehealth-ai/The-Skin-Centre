@@ -69,10 +69,27 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const base64Data = signatureImageBase64.replace(/^data:image\/\w+;base64,/, '')
     const signatureBuffer = Buffer.from(base64Data, 'base64')
 
-    // ── Upload signature to Supabase Storage ────────────────────────────────
+    // ── Storage paths (computed up front so rollback knows what to clean) ───
     const timestamp = Date.now()
-    const storagePath = `consents/${patientId}/${timestamp}_signature.png`
+    const storagePath    = `consents/${patientId}/${timestamp}_signature.png`
+    const pdfStoragePath = `consents/${patientId}/${timestamp}_consent.pdf`
 
+    // Track which files have been successfully uploaded so we can roll back on failure.
+    const uploadedPaths: string[] = []
+
+    // Item 10 fix: helper that removes all successfully uploaded files on failure,
+    // preventing orphaned patient data from accumulating in storage.
+    const rollbackStorage = async (): Promise<void> => {
+      if (uploadedPaths.length === 0) return
+      try {
+        await supabase.storage.from('patient-photos').remove(uploadedPaths)
+      } catch (cleanupErr) {
+        // Log but do not re-throw — we are already in an error path.
+        console.error('Storage rollback failed after consent creation error:', cleanupErr)
+      }
+    }
+
+    // ── Upload signature to Supabase Storage ────────────────────────────────
     const { error: uploadError } = await supabase.storage
       .from('patient-photos')
       .upload(storagePath, signatureBuffer, {
@@ -81,25 +98,33 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       })
 
     if (uploadError) {
+      // Nothing uploaded yet — no rollback needed.
       throw new Error(`Signature upload failed: ${uploadError.message}`)
     }
+
+    uploadedPaths.push(storagePath) // track for potential rollback
 
     const nowIso = new Date().toISOString()
 
     // ── Generate PDF ────────────────────────────────────────────────────────
-    const pdfBytes = await generateConsentPDF({
-      patientName: patient.full_name || 'N/A',
-      patientPhone: patient.phone || 'N/A',
-      treatment,
-      consentText,
-      signatureDataUrl: signatureImageBase64,
-      signedAt: nowIso,
-      signedByIp: clientIP,
-      staffName: profile.full_name || undefined,
-    })
+    let pdfBytes: Uint8Array
+    try {
+      pdfBytes = await generateConsentPDF({
+        patientName:      patient.full_name || 'N/A',
+        patientPhone:     patient.phone     || 'N/A',
+        treatment,
+        consentText,
+        signatureDataUrl: signatureImageBase64,
+        signedAt:         nowIso,
+        signedByIp:       clientIP,
+        staffName:        profile.full_name || undefined,
+      })
+    } catch (pdfErr) {
+      await rollbackStorage()
+      throw new Error(`PDF generation failed: ${pdfErr instanceof Error ? pdfErr.message : String(pdfErr)}`)
+    }
 
     // ── Upload PDF to Supabase Storage ──────────────────────────────────────
-    const pdfStoragePath = `consents/${patientId}/${timestamp}_consent.pdf`
     const { error: pdfUploadError } = await supabase.storage
       .from('patient-photos')
       .upload(pdfStoragePath, Buffer.from(pdfBytes), {
@@ -108,27 +133,31 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       })
 
     if (pdfUploadError) {
+      await rollbackStorage()
       throw new Error(`PDF upload failed: ${pdfUploadError.message}`)
     }
+
+    uploadedPaths.push(pdfStoragePath) // track for potential rollback
 
     // ── Insert into patient_consents ────────────────────────────────────────
     const { data: consent, error: insertError } = await supabase
       .from('patient_consents')
       .insert({
-        patient_id: patientId,
+        patient_id:             patientId,
         treatment,
-        consent_text: consentText,
-        verified_via_otp: false,
-        signature_image_url: storagePath,
-        pdf_url: pdfStoragePath,
-        signed_at: nowIso,
-        signed_by_ip: clientIP,
-        created_by_staff_id: staffId,
+        consent_text:           consentText,
+        verified_via_otp:       false,
+        signature_image_url:    storagePath,
+        pdf_url:                pdfStoragePath,
+        signed_at:              nowIso,
+        signed_by_ip:           clientIP,
+        created_by_staff_id:    staffId,
       })
       .select('id')
       .single()
 
     if (insertError || !consent) {
+      await rollbackStorage()
       throw insertError ?? new Error('Failed to insert consent record')
     }
 
@@ -139,4 +168,3 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: message }, { status: 500 })
   }
 }
-

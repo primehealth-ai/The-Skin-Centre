@@ -15,6 +15,12 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
+    const whatsappEnabled = process.env.WHATSAPP_SENDING_ENABLED === 'true'
+    if (!whatsappEnabled) {
+      console.info('WhatsApp sending disabled, skipped')
+      return NextResponse.json({ processed: 0, message: 'WhatsApp sending disabled, skipped' }, { status: 200 })
+    }
+
     const supabase = createServiceClient()
 
     // 2. Fetch pending missed calls that happened more than 60 seconds ago (batch limit 20)

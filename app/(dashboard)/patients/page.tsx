@@ -4,6 +4,7 @@ import { useEffect, useState, useRef, useCallback } from 'react'
 import { Card } from '@/components/ui/Card'
 import { PatientsTable } from '@/components/patients/PatientsTable'
 import { PatientDetailModal } from '@/components/patients/PatientDetailModal'
+import { EditPatientModal } from '@/components/patients/EditPatientModal'
 import { Modal } from '@/components/ui/Modal'
 import { Input } from '@/components/ui/Input'
 import { Button } from '@/components/ui/Button'
@@ -23,6 +24,7 @@ export default function PatientsPage() {
   const [error, setError] = useState<string | null>(null)
   
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null)
+  const [editingPatient, setEditingPatient] = useState<Patient | null>(null)
   const [isAddOpen, setIsAddOpen] = useState(false)
 
   // Form Fields for new patient
@@ -114,6 +116,13 @@ export default function PatientsPage() {
     }
   }
 
+  const handlePatientUpdated = (updatedPatient: Patient) => {
+    // Optimistically update in-place — no full reload needed
+    setPatients((prev) =>
+      prev.map((p) => (p.id === updatedPatient.id ? updatedPatient : p))
+    )
+  }
+
   return (
     <div className="flex flex-col gap-6">
       {error && (
@@ -139,6 +148,7 @@ export default function PatientsPage() {
             <PatientsTable
               patients={patients}
               onViewDetails={(p) => setSelectedPatient(p)}
+              onEditPatient={(p) => setEditingPatient(p)}
               onAddPatient={handleOpenAddModal}
             />
           )}
@@ -150,6 +160,15 @@ export default function PatientsPage() {
         isOpen={!!selectedPatient}
         onClose={() => setSelectedPatient(null)}
         patient={selectedPatient}
+        onEdit={(p) => setEditingPatient(p)}
+      />
+
+      {/* Edit patient modal */}
+      <EditPatientModal
+        isOpen={!!editingPatient}
+        onClose={() => setEditingPatient(null)}
+        patient={editingPatient}
+        onSuccess={handlePatientUpdated}
       />
 
       {/* Add patient modal */}

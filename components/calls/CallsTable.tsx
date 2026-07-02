@@ -2,6 +2,7 @@
 import { useState } from 'react'
 import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
+import { CallRecordingPlayer } from './CallRecordingPlayer'
 import { PhoneIncoming, PhoneOutgoing, Eye, Search } from 'lucide-react'
 import { formatDate, formatDuration, formatPhoneNumber } from '@/lib/utils/formatters'
 import { getCallStatusVariant, getCallStatusLabel } from '@/lib/utils/status'
@@ -91,13 +92,14 @@ export function CallsTable({ calls, onViewDetails }: CallsTableProps) {
                 <th className="px-6 py-3.5">Started At</th>
                 <th className="px-6 py-3.5">Duration</th>
                 <th className="px-6 py-3.5">Status</th>
+                <th className="px-6 py-3.5">Recording</th>
                 <th className="px-6 py-3.5 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-150 dark:divide-slate-800/60 text-slate-700 dark:text-slate-300">
               {paginatedCalls.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-6 py-10 text-center font-semibold text-slate-400 dark:text-slate-500">
+                  <td colSpan={9} className="px-6 py-10 text-center font-semibold text-slate-400 dark:text-slate-500">
                     No calls match the search criteria.
                   </td>
                 </tr>
@@ -141,6 +143,9 @@ export function CallsTable({ calls, onViewDetails }: CallsTableProps) {
                       <Badge variant={getCallStatusVariant(call.call_status)}>
                         {getCallStatusLabel(call.call_status)}
                       </Badge>
+                    </td>
+                    <td className="px-6 py-4">
+                      <CallRecordingPlayer recordingUrl={call.recording_url} variant="compact" />
                     </td>
                     <td className="px-6 py-4 text-right">
                       <Button
