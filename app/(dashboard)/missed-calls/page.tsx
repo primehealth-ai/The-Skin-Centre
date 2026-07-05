@@ -339,7 +339,7 @@ export default function MissedCallsPage() {
           await updateStatus(mc.id, 'whatsapp_sent')
           successCount++
         } catch (err) {
-          console.error(`WhatsApp send failed for ${mc.patient_phone}:`, err)
+          console.error('WhatsApp send failed for patient record:', err)
           failCount++
         }
       })

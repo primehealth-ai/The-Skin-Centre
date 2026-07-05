@@ -2,44 +2,42 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { logError } from '@/lib/utils/logError'
 import { sendMissedCallWhatsApp } from '@/lib/whatsapp/send'
 
-type CallStatus = 'answered' | 'missed' | 'no-answer' | 'busy' | 'failed'
+type CallStatus = 'answered' | 'missed'
 
 /**
- * Fix #2: normalizeCallStatus()
- * Maps Knowlarity's human-readable call_status strings to our DB enum values.
- * Falls back to 'failed' for unknown values — never crashes.
+ * Knowlarity always sends call_status="Connected" regardless of outcome.
+ * The real signal is agent_number + call_transfer_status:
+ *   - If agent_number is present (not "False" / empty) → agent answered.
+ *   - If call_transfer_status is "Missed" or "Abandoned" → missed.
+ *   - If no agent answered → missed.
  */
-function normalizeCallStatus(raw: string): CallStatus {
-  switch (raw.trim()) {
-    case 'Connected':  return 'answered'
-    case 'Missed':     return 'missed'
-    case 'No Answer':  return 'no-answer'
-    case 'Busy':       return 'busy'
-    case 'Failed':     return 'failed'
-    // lower-case aliases (legacy / other providers)
-    case 'answered':   return 'answered'
-    case 'completed':  return 'answered'
-    case 'missed':     return 'missed'
-    case 'no-answer':  return 'no-answer'
-    case 'no answer':  return 'no-answer'
-    case 'no_answer':  return 'no-answer'
-    case 'busy':       return 'busy'
-    case 'failed':     return 'failed'
-    default:           return 'failed'  // safe default — never crash
-  }
-}
+function resolveKnowlarityStatus(payload: any): {
+  isMissedCall: boolean
+  finalCallStatus: CallStatus
+  agentNumber: string | null
+  callTransferStatus: string | null
+} {
+  const rawAgentNumber = payload?.agent_number ?? null
+  const agentAnswered =
+    rawAgentNumber &&
+    String(rawAgentNumber).trim() !== 'False' &&
+    String(rawAgentNumber).trim() !== ''
 
-function resolveCallStatus(payload: any): CallStatus {
-  const rawStatus = String(
-    payload?.call_status ??
-      payload?.status ??
-      payload?.callStatus ??
-      payload?.disposition ??
-      payload?.CallStatus ??
-      ''
-  ).trim()
+  const callTransferStatus = payload?.call_transfer_status ?? null
+  const transferStatus = String(callTransferStatus ?? '').trim()
 
-  return normalizeCallStatus(rawStatus)
+  const isMissedCall =
+    transferStatus === 'Missed' ||
+    transferStatus === 'Abandoned' ||
+    !agentAnswered
+
+  const finalCallStatus: CallStatus = isMissedCall ? 'missed' : 'answered'
+
+  // Normalise agent_number: store null when Knowlarity sends "False" or empty
+  const agentNumber =
+    agentAnswered ? String(rawAgentNumber).trim() : null
+
+  return { isMissedCall, finalCallStatus, agentNumber, callTransferStatus }
 }
 
 /**
@@ -138,7 +136,15 @@ export async function processKnowlarityWebhook(payload: any): Promise<void> {
       throw patientError || new Error('Failed to upsert patient record')
     }
 
-    const callStatus = resolveCallStatus(payload)
+    // Resolve call status from agent_number + call_transfer_status.
+    // Knowlarity always sends call_status="Connected" — that field is unreliable.
+    const {
+      isMissedCall,
+      finalCallStatus,
+      agentNumber,
+      callTransferStatus,
+    } = resolveKnowlarityStatus(payload)
+
     const knowlarityCallId = payload?.knowlarity_call_id ?? payload?.call_id ?? payload?.callId ?? payload?.call_uuid ?? null
 
     // Item 19 fix: if all UUID sources are absent, generate a stable fallback rather
@@ -156,15 +162,6 @@ export async function processKnowlarityWebhook(payload: any): Promise<void> {
 
     // Fix #5: parse H:MM:SS duration string to integer seconds
     const duration = parseDuration(payload?.caller_duration ?? null)
-
-    // Fix #7: agent_number — treat "False" / "" as null
-    const rawAgentNumber = payload?.agent_number ?? null
-    const agentNumber =
-      !rawAgentNumber || String(rawAgentNumber).trim() === 'False' || String(rawAgentNumber).trim() === ''
-        ? null
-        : String(rawAgentNumber).trim()
-
-    const callTransferStatus = payload?.call_transfer_status ?? null
 
     // Fix #4: call_direction — "incoming" → "inbound", "outgoing" → "outbound"
     const rawDirection = String(payload?.call_direction ?? '').trim().toLowerCase()
@@ -199,7 +196,7 @@ export async function processKnowlarityWebhook(payload: any): Promise<void> {
           patient_phone: normalizedPhone,
           clinic_number_id: clinicNumber?.id ?? null,
           service_type: clinicNumber?.service_name ?? null,
-          call_status: callStatus,
+          call_status: finalCallStatus,
           call_direction: direction,
           virtual_number: virtualNumber,
           knowlarity_call_id: knowlarityCallId,
@@ -226,12 +223,8 @@ export async function processKnowlarityWebhook(payload: any): Promise<void> {
       throw callError || new Error('Failed to upsert call record')
     }
 
-    // Fix #3: missed call detection — check call_transfer_status === "Missed" OR
-    // normalized call_status is "missed" / "no-answer"
-    const isMissedCall =
-      String(callTransferStatus ?? '').trim() === 'Missed' ||
-      callStatus === 'missed' ||
-      callStatus === 'no-answer'
+    // isMissedCall is already resolved above via resolveKnowlarityStatus().
+    // agent_number + call_transfer_status are the authoritative signals.
 
     if (!isMissedCall) {
       return

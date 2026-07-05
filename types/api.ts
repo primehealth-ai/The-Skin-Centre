@@ -2,17 +2,6 @@
  * API Request & Response Types
  */
 
-export interface ExotelWebhookPayload {
-  CallSid: string
-  From: string
-  To: string
-  Status: 'completed' | 'failed' | 'busy' | 'no-answer'
-  Duration: string
-  Direction: 'inbound' | 'outbound'
-  StartTime?: string
-  EndTime?: string
-}
-
 export interface WhatsAppWebhookPayload {
   object: string
   entry: Array<{
@@ -55,19 +44,4 @@ export interface WhatsAppSendRequest {
   to: string
   message: string
   relatedMissedCallId?: string
-}
-
-export interface SendOTPRequest {
-  phone: string
-  patientId: string
-  treatment: string
-}
-
-export interface VerifyOTPRequest {
-  phone: string
-  code: string
-  patientId: string
-  treatment: string
-  consentText: string
-  signatureDataUrl?: string
 }

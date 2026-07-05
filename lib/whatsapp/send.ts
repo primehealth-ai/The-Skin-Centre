@@ -8,6 +8,25 @@ interface SendMissedCallWhatsAppParams {
   missedCallId: string
 }
 
+interface SendWhatsAppTemplateParams {
+  phone: string
+  templateName: string
+  language?: string
+}
+
+type KnowlarityTemplateResponse = {
+  message?: string
+  message_id?: string
+}
+
+function toProviderPhone(phone: string): string {
+  if (/^91\d{10}$/.test(phone)) {
+    return `+${phone}`
+  }
+
+  return phone
+}
+
 function getTemplateName(serviceType: string): string {
   if (serviceType === 'Skin Care') {
     return 'missed_call_skin_care'
@@ -18,6 +37,44 @@ function getTemplateName(serviceType: string): string {
   }
 
   return 'missed_call_general'
+}
+
+export async function sendWhatsAppTemplateViaGupshup(
+  params: SendWhatsAppTemplateParams
+): Promise<{ messageId: string }> {
+  const { phone, templateName, language = 'en' } = params
+  const providerPhone = toProviderPhone(phone)
+
+  const response = await fetch('https://api.knowlarity.com/wa/v1/message/template', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': process.env.KNOWLARITY_API_KEY || '',
+    },
+    // TODO: Rajesh will confirm the final Knowlarity BSP endpoint and payload contract.
+    body: JSON.stringify({
+      to: providerPhone,
+      template_name: templateName,
+      language,
+    }),
+  })
+
+  const responseData = (await response.json().catch(() => ({}))) as KnowlarityTemplateResponse
+
+  if (!response.ok) {
+    throw new Error(
+      typeof responseData?.message === 'string'
+        ? responseData.message
+        : 'Knowlarity WhatsApp template send failed'
+    )
+  }
+
+  return {
+    messageId:
+      typeof responseData?.message_id === 'string' && responseData.message_id
+        ? responseData.message_id
+        : `knowlarity_${Date.now()}`,
+  }
 }
 
 export async function sendMissedCallWhatsApp(
@@ -60,37 +117,11 @@ export async function sendMissedCallWhatsApp(
       throw missedCallError
     }
 
-    const response = await fetch(
-      'https://api.knowlarity.com/wa/v1/message/template',
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': process.env.KNOWLARITY_API_KEY || '',
-        },
-        // TODO: Rajesh will confirm the final Knowlarity BSP endpoint and payload contract.
-        body: JSON.stringify({
-          to: phone,
-          template_name: templateName,
-          language: 'en',
-        }),
-      }
-    )
-
-    const responseData = await response.json().catch(() => ({}))
-
-    if (!response.ok) {
-      throw new Error(
-        typeof responseData?.message === 'string'
-          ? responseData.message
-          : 'Knowlarity WhatsApp template send failed'
-      )
-    }
-
-    const messageId =
-      typeof responseData?.message_id === 'string' && responseData.message_id
-        ? responseData.message_id
-        : `knowlarity_${Date.now()}`
+    const { messageId } = await sendWhatsAppTemplateViaGupshup({
+      phone,
+      templateName,
+      language: 'en',
+    })
 
     const nowIso = new Date().toISOString()
 

@@ -31,7 +31,8 @@ export async function logError(
       payload: payload ?? null,
     })
 
-    if (source === 'webhook' || source === 'cron') {
+    const alertSources = new Set(['webhook', 'cron', 'consent', 'photos', 'patients', 'whatsapp', 'patients-update'])
+    if (alertSources.has(source)) {
       const botToken = process.env.TELEGRAM_BOT_TOKEN
       const chatId = process.env.TELEGRAM_CHAT_ID
 

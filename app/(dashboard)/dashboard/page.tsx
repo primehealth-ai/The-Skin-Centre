@@ -1,4 +1,5 @@
-import { createServiceClient } from '@/lib/supabase/server'
+import { redirect } from 'next/navigation'
+import { createClient, createServiceClient } from '@/lib/supabase/server'
 import StatCard from '@/components/dashboard/StatCard'
 import Link from 'next/link'
 import {
@@ -12,6 +13,15 @@ import LivePendingCalls from './LivePendingCalls'
 export const dynamic = 'force-dynamic'
 
 export default async function DashboardPage() {
+  const userSupabase = await createClient()
+  const {
+    data: { user },
+  } = await userSupabase.auth.getUser()
+
+  if (!user) {
+    redirect('/login')
+  }
+
   // --- Dates ---
   const now = new Date()
   const startOfToday = new Date(now)

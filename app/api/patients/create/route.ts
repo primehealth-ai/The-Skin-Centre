@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { logError } from '@/lib/utils/logError'
+import { isValidIndianPhone, normalizePhone } from '@/lib/utils/phone'
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
@@ -33,9 +34,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ error: 'Missing fullName or phone' }, { status: 400 })
     }
 
-    // Normalize phone number to country code format (without +)
-    const clean = phone.replace(/\D/g, '')
-    const dbPhone = clean.length === 10 ? `91${clean}` : clean
+    const dbPhone = normalizePhone(phone)
+    if (!dbPhone || !isValidIndianPhone(dbPhone)) {
+      return NextResponse.json({ error: 'Invalid phone number format' }, { status: 400 })
+    }
 
     // 3. Write record using service client
     const supabase = createServiceClient()

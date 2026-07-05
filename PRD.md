@@ -33,7 +33,7 @@ PrimeHealth is a custom-built AI-powered clinic management system designed exclu
 3. **Fragmented lead management** — No centralized system for tracking patient interactions
 
 The solution integrates:
-- AI call recording & analysis (Twilio + AssemblyAI + GPT-4)
+- AI call recording & analysis (webhook-driven call pipeline + AssemblyAI + GPT-4)
 - Automated WhatsApp follow-ups (WhatsApp Business API)
 - Real-time dashboard (Next.js + Supabase)
 - Two-way Eka Care synchronization
@@ -208,7 +208,7 @@ The solution integrates:
 - FR-2.5: Export call data to CSV/Excel
 
 **Acceptance Criteria:**
-- All calls from Twilio appear within 5 minutes
+- All calls from the webhook pipeline appear within 5 minutes
 - Transcript loads within 10 seconds of clicking
 - Audio plays without buffering
 - Filters work correctly (no data loss)
@@ -454,7 +454,7 @@ The solution integrates:
 - **Database:** Supabase (PostgreSQL) with real-time subscriptions
 - **Authentication:** Supabase Auth (multi-role)
 - **File Storage:** Supabase Storage (call recordings)
-- **Call Handling:** Twilio Voice API (3-number routing + recording)
+- **Call Handling:** webhook-driven call ingestion
 - **Transcription:** AssemblyAI (Indian English optimized)
 - **AI Analysis:** OpenAI GPT-4 Turbo
 - **Messaging:** WhatsApp Business API (Meta Cloud API)
@@ -473,17 +473,17 @@ The solution integrates:
        ↓
 ┌─────────────────────────────────────┐
 │  3 Airtel Numbers (forwarded to)   │
-│           Twilio Voice              │
+│       call webhook layer            │
 └──────────────┬──────────────────────┘
                │
-               ├─→ Call answered → Twilio records
+               ├─→ Call answered → webhook records
                │                   └─→ Webhook → Next.js API
                │                       └─→ Store in Supabase
                │                           └─→ AssemblyAI transcribe
                │                               └─→ GPT-4 analyze
                │                                   └─→ Display in dashboard
                │
-               └─→ Missed call → Twilio webhook
+               └─→ Missed call → webhook event
                                 └─→ Create missed_call record
                                     └─→ Trigger automation workflow
                                         ├─→ Auto: Send WhatsApp (60s)
@@ -532,7 +532,7 @@ See `database-schema.sql` for complete schema. Key tables:
 ### Core Tables
 - **profiles** - User accounts (admin, staff, doctor)
 - **patients** - Patient directory (with Eka Care sync)
-- **calls** - All call records (Twilio data)
+- **calls** - All call records
 - **ai_call_analysis** - GPT-4 analysis results
 - **missed_calls** - Missed call recovery queue
 - **whatsapp_messages** - Two-way message history
@@ -575,17 +575,12 @@ See `database-schema.sql` for complete schema. Key tables:
 
 ## Integration Requirements
 
-### Twilio Integration
+### Call Ingestion
 - **Purpose:** Call routing, recording, missed call detection
-- **Setup:**
-  - Port 3 Airtel numbers to Twilio OR use call forwarding
-  - Configure TwiML app with webhook URL
-  - Enable call recording
 - **Webhooks:**
-  - `/api/twilio/call-status` - Receives call status updates
-  - `/api/twilio/recording-complete` - Receives recording URL
+  - `/api/knowlarity/webhook` - Receives call status updates
 - **Data Flow:**
-  - Call initiated → Twilio webhook → Create `calls` record
+  - Call initiated → webhook → Create `calls` record
   - Call ends → Recording URL received → Store in Supabase Storage
   - Missed call → Create `missed_calls` record → Trigger automation
 
@@ -684,8 +679,7 @@ See `database-schema.sql` for complete schema. Key tables:
 - [ ] Implement real-time subscriptions
 - [ ] Add filters and search
 
-### Phase 3: Twilio Integration (Week 4)
-- [ ] Set up Twilio account
+### Phase 3: Call Ingestion (Week 4)
 - [ ] Configure call forwarding for 3 numbers
 - [ ] Implement call recording webhook
 - [ ] Store recordings in Supabase Storage
@@ -747,7 +741,6 @@ See `database-schema.sql` for complete schema. Key tables:
 - **Eka Care Sync:** Two-way data synchronization between PrimeHealth and Eka Care EMR
 
 ### References
-- Twilio Voice API Docs: https://www.twilio.com/docs/voice
 - AssemblyAI Docs: https://www.assemblyai.com/docs
 - WhatsApp Business API: https://developers.facebook.com/docs/whatsapp
 - Eka Care API: https://developer.eka.care

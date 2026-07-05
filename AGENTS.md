@@ -21,15 +21,13 @@ Always reference database-schema.sql. Never rename tables/columns.
 - message_templates
 - patient_consents
 - patient_photos
-- otp_codes
 
 ### 2. TECH STACK (FIXED)
 - Frontend: Next.js 14 (App Router) + TypeScript + Tailwind CSS
 - Backend: Next.js API Routes
 - Database: Supabase (PostgreSQL + Realtime)
-- Call Handling: Exotel API
-- WhatsApp: Direct Meta WhatsApp Cloud API
-- OTP: Twilio Verify
+- Call Handling: current webhook-driven call ingestion
+- WhatsApp: BSP-mediated messaging via Gupshup/Knowlarity
 - Storage: Supabase Storage (photos, PDFs)
 - Deploy: Vercel
 
@@ -57,11 +55,8 @@ primehealth/
 │   │   ├── consents/page.tsx
 │   │   └── photos/page.tsx
 │   └── api/
-│       ├── exotel/webhook/route.ts
 │       ├── whatsapp/webhook/route.ts
 │       ├── whatsapp/send/route.ts
-│       ├── consent/send-otp/route.ts
-│       ├── consent/verify/route.ts
 │       └── cron/process-missed-calls/route.ts
 ├── components/
 │   ├── ui/          # Button, Card, Input, Modal, Badge
@@ -75,7 +70,6 @@ primehealth/
 ├── lib/
 │   ├── supabase/client.ts
 │   ├── supabase/server.ts
-│   ├── exotel/client.ts
 │   ├── whatsapp/client.ts
 │   └── utils/formatters.ts
 ├── hooks/
@@ -101,17 +95,10 @@ primehealth/
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
-EXOTEL_API_KEY=
-EXOTEL_API_TOKEN=
-EXOTEL_ACCOUNT_SID=
-EXOTEL_EXOPHONE=
 META_WHATSAPP_TOKEN=
 META_PHONE_NUMBER_ID=
 META_WABA_ID=
 META_WEBHOOK_VERIFY_TOKEN=
-TWILIO_ACCOUNT_SID=
-TWILIO_AUTH_TOKEN=
-TWILIO_PHONE_NUMBER=
 ```
 
 ---
@@ -120,8 +107,8 @@ TWILIO_PHONE_NUMBER=
 
 ### Missed Call Flow
 ```
-Patient calls Airtel → Forwards to Exotel
-→ Exotel webhook → /api/exotel/webhook
+Patient calls clinic number → webhook ingestion
+→ call webhook → /api/knowlarity/webhook
 → Insert into calls table
 → Trigger auto_create_missed_call (DB trigger)
 → Cron job (every 1 min) checks missed_calls
@@ -140,9 +127,8 @@ Patient replies → Meta webhook → /api/whatsapp/webhook
 
 ### Consent Flow
 ```
-Staff creates consent → Send OTP via Twilio
-→ Patient enters OTP + draws signature
-→ Verify OTP → Generate PDF
+Staff creates consent → collect signature
+→ signature-only consent → Generate PDF
 → Upload to Supabase Storage
 → Save in patient_consents table
 ```
@@ -195,17 +181,14 @@ All changes below are LIVE in Supabase. Do not re-run these migrations.
 ---
 
 ### `calls` table — Added Columns
-- `dial_whom_number TEXT` — Original Airtel number patient dialed (from Exotel `DialWhomNumber` field)
-- `recording_url TEXT` — Call recording URL from Exotel (nullable)
-- `raw_payload JSONB` — Full raw Exotel webhook dump, always populate this for debugging
+- `dial_whom_number TEXT` — Original clinic number patient dialed
+- `recording_url TEXT` — Call recording URL (nullable)
+- `raw_payload JSONB` — Full raw webhook dump, always populate this for debugging
 
 ### `message_templates` table — Added Columns
 - `meta_template_name TEXT` — Exact Meta-approved template name e.g. `missed_call_skin_care`
 - `meta_template_language TEXT DEFAULT 'en'`
 - `service_type TEXT` — One of: `'Skin Care'`, `'Hair Care'`, `'General'`, `'all'`
-
-### `otp_codes` table — Added Column
-- `purpose TEXT` — One of: `'consent'`, `'whatsapp_verify'`, default `'consent'`
 
 ### `missed_calls` table — Added Columns
 - `whatsapp_attempt_count INTEGER DEFAULT 0` — Increments on each send attempt
@@ -250,9 +233,9 @@ const normalize = (phone: string) =>
 - `followup_count INTEGER DEFAULT 0` — increments each time staff follows up
 - `last_followup_at TIMESTAMPTZ` — timestamp of last followup action
 
-## EXOTEL WEBHOOK HANDLER
+## CALL WEBHOOK HANDLER
 ```ts
-// /api/exotel/webhook/route.ts
+// /api/knowlarity/webhook/route.ts
 export async function POST(req: NextRequest) {
   const body = await req.formData()
   const callSid = body.get('CallSid') as string
@@ -271,7 +254,7 @@ export async function POST(req: NextRequest) {
     .single()
 
   await supabase.from('calls').insert({
-    exotel_call_sid: callSid,
+    call_sid: callSid,
     patient_phone: from,
     incoming_number: to,
     clinic_number_id: clinicNumber?.id,
@@ -354,6 +337,7 @@ call_status = 'answered'
 
 ## BUILD PHASES
 - Phase 1 (Week 1-2): Auth + Dashboard + Patient management
-- Phase 2 (Week 3-4): Exotel webhook + Missed call recovery + WhatsApp
-- Phase 3 (Week 5-6): Consent forms + OTP + Before/after photos
+- Phase 2 (Week 3-4): call webhook + Missed call recovery + WhatsApp
+- Phase 3 (Week 5-6): Consent forms + signature + Before/after photos
 - Phase 4 (Week 7-8): Testing + Bug fixes + Launch
+

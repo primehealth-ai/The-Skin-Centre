@@ -32,7 +32,7 @@ export function useWhatsApp(activePhone?: string) {
         if (fetchErr) throw fetchErr
         setMessages(data || [])
       } catch (err: unknown) {
-        console.error(`Failed to fetch WhatsApp messages for ${activePhone}:`, err)
+        console.error('Failed to fetch WhatsApp messages for patient record:', err)
         setError(err instanceof Error ? err.message : 'Failed to load message history')
       } finally {
         setLoading(false)
@@ -104,7 +104,7 @@ export function useWhatsApp(activePhone?: string) {
       const responseData = await response.json()
       return responseData.data
     } catch (err: unknown) {
-      console.error(`Failed to send WhatsApp message to ${activePhone}:`, err)
+      console.error('Failed to send WhatsApp message for patient record:', err)
       const msg = err instanceof Error ? err.message : 'Failed to send WhatsApp message'
       setError(msg)
       throw new Error(msg)

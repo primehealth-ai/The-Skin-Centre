@@ -2,6 +2,11 @@ const fs = require('fs')
 const path = require('path')
 const { createClient } = require('@supabase/supabase-js')
 
+if (process.env.NODE_ENV === 'production') {
+  console.error('FATAL: seed-db.js must never run in production')
+  process.exit(1)
+}
+
 // 1. Read and parse .env.local
 const envPath = path.join(__dirname, '.env.local')
 if (!fs.existsSync(envPath)) {
@@ -83,7 +88,7 @@ async function runSeed() {
         id: adminUid,
         full_name: 'Dr. Abhinav Kumar',
         role: 'admin',
-        phone: '+919999999999',
+        phone: '919999999999',
         is_active: true
       })
       if (profileErr) throw profileErr
@@ -97,9 +102,9 @@ async function runSeed() {
       console.log('✅ Clinic numbers already seeded.')
     } else {
       const { error: clinicErr } = await supabase.from('clinic_numbers').insert([
-        { phone_number: '+918000000001', service_name: 'Hair Care', display_name: 'Hair Treatment Helpline', is_active: true },
-        { phone_number: '+918000000002', service_name: 'Skin Care', display_name: 'Skin Treatment Helpline', is_active: true },
-        { phone_number: '+918000000003', service_name: 'General', display_name: 'General Enquiry', is_active: true }
+        { phone_number: '918000000001', service_name: 'Hair Care', display_name: 'Hair Treatment Helpline', is_active: true },
+        { phone_number: '918000000002', service_name: 'Skin Care', display_name: 'Skin Treatment Helpline', is_active: true },
+        { phone_number: '918000000003', service_name: 'General', display_name: 'General Enquiry', is_active: true }
       ])
       if (clinicErr) throw clinicErr
       console.log('✅ Mapped 3 Airtel clinic numbers.')
@@ -146,7 +151,7 @@ async function runSeed() {
       const { data: seededPatients, error: patientErr } = await supabase.from('patients').insert([
         {
           full_name: 'Ayush Kumar',
-          phone: '+919876543210',
+          phone: '919876543210',
           email: 'ayush@example.com',
           gender: 'male',
           date_of_birth: '2001-08-15',
@@ -155,7 +160,7 @@ async function runSeed() {
         },
         {
           full_name: 'Nisha Kumari',
-          phone: '+919988776655',
+          phone: '919988776655',
           email: 'nisha@example.com',
           gender: 'female',
           date_of_birth: '1995-03-24',
@@ -164,7 +169,7 @@ async function runSeed() {
         },
         {
           full_name: 'Vikram Singh',
-          phone: '+919933221100',
+          phone: '919933221100',
           email: 'vikram@example.com',
           gender: 'male',
           date_of_birth: '1988-12-05',
@@ -197,7 +202,7 @@ async function runSeed() {
           patient_id: patientA.id,
           patient_name: patientA.full_name,
           call_sid: `ex_sid_${Date.now()}_A`,
-          incoming_number: '+918000000002',
+          incoming_number: '918000000002',
           service_type: 'Skin Care',
           call_status: 'missed',
           call_direction: 'inbound',
@@ -209,7 +214,7 @@ async function runSeed() {
           patient_id: patientB.id,
           patient_name: patientB.full_name,
           call_sid: `ex_sid_${Date.now()}_B`,
-          incoming_number: '+918000000001',
+          incoming_number: '918000000001',
           service_type: 'Hair Care',
           call_status: 'answered',
           call_direction: 'inbound',
@@ -223,7 +228,7 @@ async function runSeed() {
           patient_id: patientC.id,
           patient_name: patientC.full_name,
           call_sid: `ex_sid_${Date.now()}_C`,
-          incoming_number: '+918000000003',
+          incoming_number: '918000000003',
           service_type: 'General',
           call_status: 'missed',
           call_direction: 'inbound',

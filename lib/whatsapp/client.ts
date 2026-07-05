@@ -1,3 +1,12 @@
+// ============================================================
+// WARNING: DO NOT USE - WRONG WHATSAPP PROVIDER
+// This file implements Meta Cloud API directly.
+// PrimeHealth uses Gupshup BSP via Knowlarity.
+// Pending: Gupshup API docs confirmation from Rajesh Singh.
+// When docs arrive, implement the real endpoint in send.ts
+// and delete this file.
+// ============================================================
+
 /**
  * Meta WhatsApp Cloud API Client
  */

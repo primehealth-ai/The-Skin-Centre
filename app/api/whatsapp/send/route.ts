@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { sendWhatsAppMessage, sendWhatsAppTemplate } from '@/lib/whatsapp/client'
-import { normalizePhone } from '@/lib/knowlarity/client'
-import { isValidIndianPhone } from '@/lib/utils/phone'
+import { logError } from '@/lib/utils/logError'
+import { isValidIndianPhone, normalizePhone } from '@/lib/utils/phone'
+import { sendWhatsAppTemplateViaGupshup } from '@/lib/whatsapp/send'
 
 export const dynamic = 'force-dynamic'
 
@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
 
     // 2. Validate phone and message constraints
     const normalizedPhone = normalizePhone(to)
-    if (!isValidIndianPhone(normalizedPhone)) {
+    if (!normalizedPhone || !isValidIndianPhone(normalizedPhone)) {
       return NextResponse.json({ error: 'Invalid recipient phone number format' }, { status: 400 })
     }
 
@@ -41,7 +41,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid WhatsApp template name' }, { status: 400 })
     }
 
-    const dbPhone = normalizedPhone.replace(/^\+/, '').replace(/^0/, '')
+    const dbPhone = normalizedPhone
 
     // 1. Opt-out check
     const { data: optedOut, error: optedOutError } = await supabase
@@ -61,65 +61,32 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // 2. 24h session window gating check for free-form messages
     if (!templateName) {
-      const { data: latestCall, error: sessionError } = await supabase
-        .from('missed_calls')
-        .select('whatsapp_session_expires_at')
-        .eq('patient_phone', dbPhone)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle()
-
-      if (sessionError) {
-        console.error('WhatsApp send session check error:', sessionError.message)
-      }
-
-      const sessionExpires = latestCall?.whatsapp_session_expires_at
-      const now = new Date()
-      const isSessionActive = sessionExpires && new Date(sessionExpires) > now
-
-      if (!isSessionActive) {
-        return NextResponse.json(
-          { error: 'Free-form messages are blocked: No active 24-hour WhatsApp session window exists for this number.' },
-          { status: 400 }
-        )
-      }
-    }
-
-    let messageText = message
-    let metaResponse
-
-    if (templateName) {
-      const { data: template } = await supabase
-        .from('message_templates')
-        .select('message_text, meta_template_language')
-        .eq('meta_template_name', templateName)
-        .eq('is_active', true)
-        .maybeSingle()
-
-      messageText = template?.message_text || templateName
-      metaResponse = await sendWhatsAppTemplate(
-        normalizedPhone,
-        templateName,
-        template?.meta_template_language || 'en'
+      return NextResponse.json(
+        { error: 'Free-form WhatsApp sends are disabled until the Knowlarity/Gupshup text endpoint is confirmed.' },
+        { status: 400 }
       )
-    } else {
-      metaResponse = await sendWhatsAppMessage(normalizedPhone, message)
-    }
-    
-    if (metaResponse.error) {
-      console.error('Meta API Dispatch Error:', metaResponse.error)
-      return NextResponse.json({ error: metaResponse.error.message || 'WhatsApp sending failed' }, { status: 500 })
     }
 
-    const messageId = metaResponse.messages?.[0]?.id || `out_${Date.now()}`
+    const { data: template } = await supabase
+      .from('message_templates')
+      .select('message_text, meta_template_language')
+      .eq('meta_template_name', templateName)
+      .eq('is_active', true)
+      .maybeSingle()
+
+    const messageText = template?.message_text || templateName
+    const { messageId } = await sendWhatsAppTemplateViaGupshup({
+      phone: dbPhone,
+      templateName,
+      language: template?.meta_template_language || 'en',
+    })
 
     // Fetch patient ID if profile exists
     const { data: patient } = await supabase
       .from('patients')
       .select('id, full_name')
-      .eq('phone', normalizedPhone)
+      .eq('phone', dbPhone)
       .maybeSingle()
 
     // Log message as outbound
@@ -127,7 +94,7 @@ export async function POST(req: NextRequest) {
       .from('whatsapp_messages')
       .insert({
         patient_id: patient?.id || null,
-        patient_phone: normalizedPhone,
+        patient_phone: dbPhone,
         patient_name: patient?.full_name || 'Patient',
         whatsapp_message_id: messageId,
         message_text: messageText,
@@ -141,7 +108,12 @@ export async function POST(req: NextRequest) {
       .single()
 
     if (insertErr) {
-      console.error('Database logging error for outbound WhatsApp:', insertErr.message)
+      await logError('whatsapp', insertErr, {
+        route: 'manual-send',
+        phone: dbPhone,
+        templateName,
+        relatedMissedCallId: relatedMissedCallId || null,
+      })
     }
 
     // If this is sent as recovery, update missed calls tracking
@@ -156,13 +128,18 @@ export async function POST(req: NextRequest) {
         .eq('id', relatedMissedCallId)
       
       if (updateErr) {
-        console.error('Failed to update missed call record after WhatsApp recovery dispatch:', updateErr.message)
+        await logError('whatsapp', updateErr, {
+          route: 'manual-send',
+          missedCallId: relatedMissedCallId,
+          phone: dbPhone,
+          step: 'update_missed_call',
+        })
       }
     }
 
     return NextResponse.json({ success: true, data: loggedMsg }, { status: 200 })
   } catch (err: unknown) {
-    console.error('WhatsApp send route error:', err instanceof Error ? err.message : err)
+    await logError('whatsapp', err, { route: 'manual-send' })
     return NextResponse.json({ error: err instanceof Error ? err.message : 'Internal Server Error' }, { status: 500 })
   }
 }

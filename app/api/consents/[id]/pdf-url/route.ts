@@ -72,10 +72,10 @@ export async function GET(
 
     const bucketName = getBucketName(storagePath)
 
-    // 3. Generate signed URL (60 seconds expiry)
+    // 3. Generate signed URL (300 seconds expiry)
     const { data: signedData, error: signedError } = await supabase.storage
       .from(bucketName)
-      .createSignedUrl(storagePath, 60)
+      .createSignedUrl(storagePath, 300)
 
     if (signedError || !signedData?.signedUrl) {
       throw new Error(`Failed to generate signed PDF URL: ${signedError?.message ?? 'Unknown error'}`)

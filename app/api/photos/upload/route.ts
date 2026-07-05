@@ -51,6 +51,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       )
     }
 
+    const { data: patient, error: patientError } = await supabase
+      .from('patients')
+      .select('id')
+      .eq('id', patientId)
+      .single()
+
+    if (patientError || !patient) {
+      return NextResponse.json({ error: 'Patient not found' }, { status: 404 })
+    }
+
     if (!['before', 'after'].includes(photoType)) {
       return NextResponse.json({ error: 'photoType must be "before" or "after"' }, { status: 400 })
     }
@@ -133,6 +143,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       .single()
 
     if (insertError || !photo) {
+      await supabase.storage.from('patient-photos').remove([storagePath])
       throw insertError ?? new Error('Failed to insert photo record')
     }
 

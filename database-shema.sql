@@ -68,7 +68,7 @@ CREATE TABLE public.calls (
 );
 CREATE TABLE public.missed_calls (
   id uuid NOT NULL DEFAULT uuid_generate_v4(),
-  call_id uuid,
+  call_id uuid UNIQUE,
   patient_id uuid,
   patient_phone text NOT NULL,
   patient_name text,
@@ -159,6 +159,7 @@ CREATE TABLE public.patient_photos (
   taken_by_staff_id uuid,
   taken_at timestamp with time zone DEFAULT now(),
   created_at timestamp with time zone DEFAULT now(),
+  deleted_at timestamp with time zone,
   CONSTRAINT patient_photos_pkey PRIMARY KEY (id),
   CONSTRAINT patient_photos_patient_id_fkey FOREIGN KEY (patient_id) REFERENCES public.patients(id),
   CONSTRAINT patient_photos_taken_by_staff_id_fkey FOREIGN KEY (taken_by_staff_id) REFERENCES public.profiles(id)
@@ -172,6 +173,7 @@ CREATE TABLE public.webhook_queue (
   error text,
   created_at timestamp with time zone DEFAULT now(),
   processed_at timestamp with time zone,
+  claimed_at timestamp with time zone,
   CONSTRAINT webhook_queue_pkey PRIMARY KEY (id)
 );
 CREATE TABLE public.forwarding_health (

@@ -68,9 +68,8 @@ export default function PatientsPage() {
     e.preventDefault()
     if (!fullName || !phone) return
 
-    // Validate phone number format
     const normalizedPatientPhone = normalizePhone(phone)
-    if (!isValidIndianPhone(normalizedPatientPhone)) {
+    if (!normalizedPatientPhone || !isValidIndianPhone(normalizedPatientPhone)) {
       setError('Invalid Indian phone number. Please enter a valid 10-digit number.')
       return
     }

@@ -1,4 +1,3 @@
--- 1. Redundant columns cleanup & additions in calls
 UPDATE public.calls SET call_sid = exotel_call_sid WHERE call_sid IS NULL OR call_sid <> exotel_call_sid;
 ALTER TABLE public.calls DROP COLUMN IF EXISTS call_sid;
 ALTER TABLE public.calls RENAME COLUMN exotel_call_sid TO call_sid;
@@ -6,7 +5,6 @@ ALTER TABLE public.calls RENAME CONSTRAINT calls_exotel_call_sid_key TO calls_ca
 ALTER TABLE public.calls ADD COLUMN IF NOT EXISTS agent_number text;
 ALTER TABLE public.calls ADD COLUMN IF NOT EXISTS call_transfer_status text;
 
--- 2. Drop dead otp_codes table
 DROP TABLE IF EXISTS public.otp_codes;
 
 -- 3. Storage buckets setup (Private)

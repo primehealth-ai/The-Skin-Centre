@@ -69,6 +69,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const base64Data = signatureImageBase64.replace(/^data:image\/\w+;base64,/, '')
     const signatureBuffer = Buffer.from(base64Data, 'base64')
 
+    if (signatureBuffer.length > 5 * 1024 * 1024) {
+      return NextResponse.json({ error: 'Signature image exceeds 5MB limit' }, { status: 400 })
+    }
+
     // ── Storage paths (computed up front so rollback knows what to clean) ───
     const timestamp = Date.now()
     const storagePath    = `consents/${patientId}/${timestamp}_signature.png`
@@ -146,6 +150,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         patient_id:             patientId,
         treatment,
         consent_text:           consentText,
+        // OTP verification intentionally disabled — signature-only consent
         verified_via_otp:       false,
         signature_image_url:    storagePath,
         pdf_url:                pdfStoragePath,

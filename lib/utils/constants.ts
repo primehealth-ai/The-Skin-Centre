@@ -80,9 +80,7 @@ export function getISTToday(): string {
  */
 export function getISTWeekStart(): string {
   const now = new Date()
-  const day = now.getDay()
-  const diff = now.getDate() - day
-  const weekStart = new Date(now.setDate(diff))
+  const weekStart = new Date(now.getTime() - (now.getDay() * 86400000))
   return weekStart.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' })
 }
 

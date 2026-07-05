@@ -27,7 +27,7 @@ export async function middleware(request: NextRequest) {
   }
 
   // ── Public API routes that require no auth ───────────────────────────────────
-  const isPublicApi = pathname === '/api/whatsapp/webhook' || pathname === '/api/diagnostic'
+  const isPublicApi = pathname === '/api/whatsapp/webhook'
   if (isPublicApi) {
     return NextResponse.next({ request })
   }

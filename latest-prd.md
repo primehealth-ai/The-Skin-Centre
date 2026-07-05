@@ -17,7 +17,7 @@
 Custom dashboard with:
 1. Automated missed call → WhatsApp recovery
 2. Two-way WhatsApp chat
-3. Digital consent forms (OTP verified)
+3. Digital consent forms (signature verified)
 4. Before/after photo management
 5. Patient database
 
@@ -29,23 +29,10 @@ Custom dashboard with:
 | Frontend | Next.js 14 + TypeScript + Tailwind |
 | Backend | Next.js API Routes |
 | Database | Supabase (PostgreSQL + Realtime) |
-| Calls | Exotel (1 ExoPhone, passthru applet) |
-| WhatsApp | Meta WhatsApp Cloud API (direct) |
-| OTP | Twilio Verify |
+| Calls | webhook-driven call ingestion |
+| WhatsApp | BSP-mediated WhatsApp via Gupshup/Knowlarity |
 | Storage | Supabase Storage |
 | Deploy | Vercel |
-
----
-
-## EXOTEL SETUP (CONFIRMED)
-- 1 ExoPhone handles all 3 Airtel numbers
-- All 3 Airtel numbers forward to 1 ExoPhone via *21*
-- Webhook fields:
-  - `From` = Airtel clinic number (identifies Hair/Skin/General)
-  - `To` = Patient phone number
-  - `CallerID` = ExoPhone number
-  - `Status` = answered/no-answer/busy
-- API maps `From` → `clinic_numbers` table → service type
 
 ---
 
@@ -71,7 +58,7 @@ Custom dashboard with:
 - All calls table with filters
 - Columns: Time, Patient Phone, Service, Status, Duration, Staff
 - Filter by: Date, Service type, Status
-- Auto-populated via Exotel webhook
+- Auto-populated via call webhook
 
 ### 3. Missed Call Recovery (Priority: CRITICAL)
 - Auto WhatsApp within 60 seconds of missed call
@@ -93,7 +80,6 @@ Custom dashboard with:
 
 ### 6. Consent Management (Priority: HIGH)
 - Digital consent form templates
-- OTP verification via Twilio
 - Touchscreen signature capture
 - PDF generation + Supabase Storage
 - Linked to patient record
@@ -109,9 +95,9 @@ Custom dashboard with:
 ## MISSED CALL WORKFLOW
 ```
 Patient calls Airtel number
-→ Forwards to Exotel ExoPhone (*21*)
+→ Forwards to clinic call webhook
 → Staff busy/unavailable
-→ Exotel webhook fires to /api/exotel/webhook
+→ call webhook fires to /api/knowlarity/webhook
 → DB trigger creates missed_calls record
 → Cron job (every 1 min) checks pending records
 → If missed_at > 60 seconds ago
@@ -143,7 +129,6 @@ We'll contact you shortly! Reply here for help."
 7. message_templates
 8. patient_consents
 9. patient_photos
-10. otp_codes
 
 ---
 
@@ -155,9 +140,7 @@ We'll contact you shortly! Reply here for help."
 ## MONTHLY SERVICES COST
 | Service | Cost |
 |---------|------|
-| Exotel | TBD (awaiting Maha's quote) |
 | Meta WhatsApp API | ~₹2,000 |
-| Twilio OTP | ~₹500 |
 | Supabase Pro | ₹1,500 |
 | Vercel | ₹0 |
 
@@ -167,15 +150,14 @@ We'll contact you shortly! Reply here for help."
 | Week | Phase | Deliverables |
 |------|-------|-------------|
 | 1-2 | Foundation | Auth, Dashboard UI, Patient management |
-| 3-4 | Calls + WhatsApp | Exotel webhook, missed call recovery, chat UI |
-| 5-6 | Consent + Photos | OTP system, signature, photo comparison |
+| 3-4 | Calls + WhatsApp | call webhook, missed call recovery, chat UI |
+| 5-6 | Consent + Photos | signature flow, photo comparison |
 | 7 | Testing | QA, bug fixes, Dr. Abhinav review |
 | 8 | Launch | Deploy, staff training, go-live |
 
 ---
 
 ## PENDING (Waiting)
-- [ ] Exotel pricing from Maha
 - [ ] Dr. Abhinav's 3 Airtel numbers
 - [ ] New SIM for WhatsApp Business
 - [ ] ₹40K payment from Dr. Abhinav

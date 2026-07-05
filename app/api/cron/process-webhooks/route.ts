@@ -48,6 +48,7 @@ async function processWebhooks() {
           .from('webhook_queue')
           .update({
             status: attemptsUsed >= 3 ? 'failed' : 'pending',
+            attempts: attemptsUsed + 1,
             error: errMessage,
           })
           .eq('id', job.id)

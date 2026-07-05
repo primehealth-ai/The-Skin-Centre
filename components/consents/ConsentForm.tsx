@@ -19,6 +19,8 @@ import {
 } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { Input } from '../ui/Input'
+import { formatPhoneNumber } from '@/lib/utils/formatters'
+import { normalizePhone } from '@/lib/utils/phone'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -138,8 +140,8 @@ export function ConsentForm({ onSuccess }: ConsentFormProps = {}) {
   // ── Handlers ─────────────────────────────────────────────────────────────
 
   const handleSearch = async () => {
-    const normalized = phoneQuery.trim().replace(/\D/g, '')
-    if (!normalized) {
+    const normalizedPhone = normalizePhone(phoneQuery)
+    if (!normalizedPhone) {
       setSearchError('Please enter a phone number')
       return
     }
@@ -150,11 +152,10 @@ export function ConsentForm({ onSuccess }: ConsentFormProps = {}) {
     setShowCreateInline(false)
 
     try {
-      // Match last 10 digits to handle country code variants
       const { data, error } = await supabase
         .from('patients')
         .select('id, full_name, phone')
-        .ilike('phone', `%${normalized.slice(-10)}`)
+        .eq('phone', normalizedPhone)
         .limit(1)
         .maybeSingle()
 
@@ -163,7 +164,7 @@ export function ConsentForm({ onSuccess }: ConsentFormProps = {}) {
       if (!data) {
         setSearchError('No patient found with that phone number. You can register them below.')
         setShowCreateInline(true)
-        setNewPatientPhone(phoneQuery)
+        setNewPatientPhone(normalizedPhone)
         setNewPatientName('')
         return
       }
@@ -182,6 +183,12 @@ export function ConsentForm({ onSuccess }: ConsentFormProps = {}) {
       return
     }
 
+    const normalizedPhone = normalizePhone(newPatientPhone)
+    if (!normalizedPhone) {
+      setSearchError('Please enter a valid Indian phone number to create a new patient.')
+      return
+    }
+
     setCreateLoading(true)
     setSearchError(null)
 
@@ -191,7 +198,7 @@ export function ConsentForm({ onSuccess }: ConsentFormProps = {}) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           fullName: newPatientName.trim(),
-          phone: newPatientPhone.trim(),
+          phone: normalizedPhone,
         }),
       })
 
@@ -433,7 +440,7 @@ export function ConsentForm({ onSuccess }: ConsentFormProps = {}) {
                     {patient.full_name ?? 'Unknown Name'}
                   </p>
                   <p className="text-[11px] font-semibold text-slate-400 truncate">
-                    {patient.phone}
+                    {formatPhoneNumber(patient.phone)}
                   </p>
                 </div>
                 <div className="shrink-0">
@@ -468,7 +475,7 @@ export function ConsentForm({ onSuccess }: ConsentFormProps = {}) {
             <div className="flex items-center gap-2 p-3 bg-slate-50 dark:bg-slate-950/60 rounded-xl border border-slate-200 dark:border-slate-800">
               <User className="h-3.5 w-3.5 text-slate-400 shrink-0" />
               <span className="text-xs font-bold text-slate-600 dark:text-slate-300 truncate">
-                {patient?.full_name ?? 'Unknown'} — {patient?.phone}
+                {patient?.full_name ?? 'Unknown'} — {patient ? formatPhoneNumber(patient.phone) : ''}
               </span>
             </div>
 
