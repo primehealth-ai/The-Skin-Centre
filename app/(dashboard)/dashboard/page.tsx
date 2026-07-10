@@ -3,12 +3,14 @@ import { createClient, createServiceClient } from '@/lib/supabase/server'
 import StatCard from '@/components/dashboard/StatCard'
 import Link from 'next/link'
 import {
-  Phone, PhoneIncoming, Activity, MessageSquare, IndianRupee,
+  Phone, PhoneIncoming, IndianRupee,
   Clock, HeartPulse, CheckCircle2, AlertCircle, Zap, Users,
-  Clipboard, Camera, ArrowRight, FileText
+  Clipboard, Camera, MessageSquare, FileText
 } from 'lucide-react'
 import DashboardCharts from './DashboardCharts'
 import LivePendingCalls from './LivePendingCalls'
+import LiveTodayStats from './LiveTodayStats'
+import LiveRecentMissedQueue from './LiveRecentMissedQueue'
 
 export const dynamic = 'force-dynamic'
 
@@ -86,12 +88,11 @@ export default async function DashboardPage() {
       supabase.from('missed_calls').select('missed_at, recovered').gte('missed_at', startOfMonthISO),
 
       // Recent Data for Details Sections
-      supabase.from('missed_calls').select('*').eq('status', 'pending').order('missed_at', { ascending: false }).limit(5),
+      supabase.from('missed_calls').select('*, patients(full_name)').eq('status', 'pending').order('missed_at', { ascending: false }).limit(5),
       supabase.from('patient_consents').select('id, treatment, created_at, otp_verified_at, patients(full_name)').order('created_at', { ascending: false }).limit(5)
     ])
 
     // --- Computations ---
-    const recoveryRateToday = missedCallsToday ? Math.round(((recoveredToday ?? 0) / missedCallsToday) * 100) : 0
     const revenueRecoveredThisWeek = (recoveredThisWeek ?? 0) * 3000
 
     // Most active hour
@@ -179,37 +180,16 @@ export default async function DashboardPage() {
           </div>
         </div>
 
-        {/* --- ROW 1: Today's Stats --- */}
+        {/* --- ROW 1: Today's Stats (realtime client component) --- */}
         <div>
           <h2 className="text-xs font-extrabold text-slate-400 uppercase tracking-widest mb-4">Today's Pulse</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <StatCard
-              title="Total Calls Today"
-              value={totalCallsToday ?? 0}
-              icon={Phone}
-              color="blue"
-            />
-            <StatCard
-              title="Missed Calls Today"
-              value={missedCallsToday ?? 0}
-              icon={PhoneIncoming}
-              color="red"
-            />
-            <StatCard
-              title="Recovery Rate (Today)"
-              value={`${recoveryRateToday}%`}
-              icon={Activity}
-              color="purple"
-              trend={recoveryRateToday >= 50 ? 'Excellent' : 'Needs Attention'}
-              trendUp={recoveryRateToday >= 50}
-            />
-            <StatCard
-              title="WhatsApp Sent Today"
-              value={whatsappSentToday ?? 0}
-              icon={MessageSquare}
-              color="green"
-            />
-          </div>
+          <LiveTodayStats
+            initialTotalCalls={totalCallsToday ?? 0}
+            initialMissedCalls={missedCallsToday ?? 0}
+            initialRecovered={recoveredToday ?? 0}
+            initialWhatsappSent={whatsappSentToday ?? 0}
+            startOfTodayISO={startOfTodayISO}
+          />
         </div>
 
         {/* --- ROW 2: This Week --- */}
@@ -353,43 +333,8 @@ export default async function DashboardPage() {
                 </Link>
               </div>
               
-              <div className="divide-y divide-slate-50 dark:divide-slate-800/60">
-                {recentMissedCalls?.length === 0 ? (
-                  <div className="px-5 py-12 text-center flex flex-col items-center">
-                    <div className="w-12 h-12 rounded-full bg-emerald-50 dark:bg-emerald-950/30 flex items-center justify-center mb-3">
-                      <CheckCircle2 size={24} className="text-emerald-500" />
-                    </div>
-                    <p className="text-sm font-extrabold text-slate-600 dark:text-slate-300">All Clear!</p>
-                    <p className="text-xs font-bold text-slate-400 mt-1">No pending missed calls right now.</p>
-                  </div>
-                ) : (
-                  recentMissedCalls?.map((call: any) => (
-                    <div key={call.id} className="px-5 py-4 flex items-center justify-between hover:bg-rose-50/20 dark:hover:bg-rose-950/10 transition-colors group">
-                      <div className="flex items-center gap-4">
-                        <div className="h-10 w-10 rounded-full bg-rose-50 dark:bg-rose-950/30 flex items-center justify-center shrink-0 border border-rose-100 dark:border-rose-900/30">
-                          <PhoneIncoming size={16} className="text-rose-500" />
-                        </div>
-                        <div className="min-w-0">
-                          <p className="text-sm font-black text-slate-800 dark:text-slate-100 truncate">
-                            {call.patient_name || call.patient_phone}
-                          </p>
-                          <p className="text-[11px] font-bold text-slate-400 dark:text-slate-500 mt-0.5 flex gap-2">
-                            <span>{call.service_type || 'General'}</span>
-                            <span>&bull;</span>
-                            <span>{new Date(call.missed_at).toLocaleString()}</span>
-                          </p>
-                        </div>
-                      </div>
-                      <Link
-                        href={`/whatsapp?phone=${encodeURIComponent(call.patient_phone)}`}
-                        className="px-4 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 dark:text-slate-900 text-white rounded-lg text-xs font-bold transition-all shadow-sm active:scale-95 flex items-center gap-1.5"
-                      >
-                        Message <ArrowRight size={12} />
-                      </Link>
-                    </div>
-                  ))
-                )}
-              </div>
+              {/* Recent Missed Calls Queue — realtime client component */}
+              <LiveRecentMissedQueue initialRows={recentMissedCalls ?? []} />
             </div>
           </div>
 

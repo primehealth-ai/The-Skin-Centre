@@ -6,9 +6,9 @@ import { CallRecordingPlayer } from './CallRecordingPlayer'
 import { PhoneIncoming, PhoneOutgoing, Eye, Search } from 'lucide-react'
 import { formatDate, formatDuration, formatPhoneNumber } from '@/lib/utils/formatters'
 import { getCallStatusVariant, getCallStatusLabel } from '@/lib/utils/status'
-import { Database } from '@/types/database'
+import { CallWithPatient } from '@/types/database'
 
-type Call = Database['public']['Tables']['calls']['Row']
+type Call = CallWithPatient
 
 interface CallsTableProps {
   calls: Call[]
@@ -24,7 +24,7 @@ export function CallsTable({ calls, onViewDetails }: CallsTableProps) {
   const filteredCalls = calls.filter((call) => {
     const matchesSearch =
       call.patient_phone.includes(searchTerm) ||
-      (call.patient_name && call.patient_name.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (call.patients?.full_name && call.patients.full_name.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (call.service_type && call.service_type.toLowerCase().includes(searchTerm.toLowerCase()))
 
     const matchesStatus = statusFilter === 'all' || call.call_status === statusFilter
@@ -120,7 +120,7 @@ export function CallsTable({ calls, onViewDetails }: CallsTableProps) {
                     <td className="px-6 py-4">
                       <div className="flex flex-col gap-0.5">
                         <span className="font-bold text-slate-800 dark:text-slate-100">
-                          {call.patient_name || 'New Patient'}
+                          {call.patients?.full_name || 'New Patient'}
                         </span>
                         <span className="text-[10px] text-slate-400 dark:text-slate-500 font-semibold">
                           {formatPhoneNumber(call.patient_phone)}

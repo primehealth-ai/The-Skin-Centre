@@ -1,9 +1,9 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { Database } from '@/types/database'
+import { MissedCallWithPatient } from '@/types/database'
 import { RealtimePostgresChangesPayload } from '@supabase/supabase-js'
 
-type MissedCall = Database['public']['Tables']['missed_calls']['Row']
+type MissedCall = MissedCallWithPatient
 type MissedCallStatus = MissedCall['status']
 
 export function useMissedCalls() {
@@ -13,47 +13,47 @@ export function useMissedCalls() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    async function fetchMissedCalls() {
+  // Patient name is read live from patients.full_name via the patient_id FK —
+  // missed_calls no longer stores a denormalized patient_name snapshot.
+  const fetchMissedCalls = useCallback(
+    async (silent = false) => {
       try {
-        setLoading(true)
+        if (!silent) setLoading(true)
         setError(null)
         const { data, error: fetchErr } = await supabase
           .from('missed_calls')
-          .select('*')
+          .select('*, patients(full_name)')
           .order('missed_at', { ascending: false })
           .limit(200) // Impose limit to prevent overfetching
 
         if (fetchErr) throw fetchErr
-        setMissedCalls(data || [])
+        setMissedCalls((data as MissedCall[]) || [])
       } catch (err: unknown) {
         console.error('Failed to fetch missed calls:', err)
         setError(err instanceof Error ? err.message : 'Failed to retrieve missed calls queue')
       } finally {
-        setLoading(false)
+        if (!silent) setLoading(false)
       }
-    }
+    },
+    [supabase]
+  )
 
+  useEffect(() => {
     fetchMissedCalls()
 
-    // Realtime channel listener
+    // Realtime channel listener. Realtime payloads omit embedded relations, so a
+    // spliced payload.new would drop patients.full_name — refetch (silent) on
+    // INSERT/UPDATE to keep the join populated. DELETE can prune locally.
     const channel = supabase
       .channel('missed_calls_changes')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'missed_calls' },
         (payload: RealtimePostgresChangesPayload<MissedCall>) => {
-          if (payload.eventType === 'INSERT') {
-            setMissedCalls((prev) => {
-              const updated = [payload.new as MissedCall, ...prev]
-              return updated.slice(0, 200)
-            })
-          } else if (payload.eventType === 'UPDATE') {
-            setMissedCalls((prev) =>
-              prev.map((c) => (c.id === payload.new.id ? (payload.new as MissedCall) : c))
-            )
-          } else if (payload.eventType === 'DELETE') {
-            setMissedCalls((prev) => prev.filter((c) => c.id !== payload.old.id))
+          if (payload.eventType === 'DELETE') {
+            setMissedCalls((prev) => prev.filter((c) => c.id !== (payload.old as { id: string }).id))
+          } else {
+            fetchMissedCalls(true)
           }
         }
       )
@@ -62,7 +62,7 @@ export function useMissedCalls() {
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [supabase])
+  }, [supabase, fetchMissedCalls])
 
   const assignMissedCall = async (id: string, staffId: string): Promise<MissedCall> => {
     try {

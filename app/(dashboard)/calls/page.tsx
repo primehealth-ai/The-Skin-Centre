@@ -5,7 +5,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { CallsTable } from '@/components/calls/CallsTable'
 import { CallDetailModal } from '@/components/calls/CallDetailModal'
-import { Database } from '@/types/database'
+import { CallWithPatient } from '@/types/database'
 import { RealtimePostgresChangesPayload } from '@supabase/supabase-js'
 import {
   Phone,
@@ -22,7 +22,7 @@ import {
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type Call = Database['public']['Tables']['calls']['Row']
+type Call = CallWithPatient
 
 type DateRangeKey = 'today' | 'week' | 'month' | 'all'
 type ServiceKey = 'all' | 'hair-care' | 'skin-care' | 'general'
@@ -103,7 +103,7 @@ function applyFilters(calls: Call[], filters: FilterState): Call[] {
     // Search
     if (searchLower) {
       const phoneMatch = call.patient_phone?.includes(searchLower)
-      const nameMatch = call.patient_name?.toLowerCase().includes(searchLower)
+      const nameMatch = call.patients?.full_name?.toLowerCase().includes(searchLower)
       const serviceMatch = call.service_type?.toLowerCase().includes(searchLower)
       if (!phoneMatch && !nameMatch && !serviceMatch) return false
     }
@@ -143,7 +143,7 @@ function exportToCSV(calls: Call[]) {
 
   const rows = calls.map((c) => [
     c.call_sid ?? '',
-    c.patient_name ?? '',
+    c.patients?.full_name ?? '',
     c.patient_phone ?? '',
     c.incoming_number ?? '',
     c.service_type ?? '',
@@ -393,7 +393,7 @@ export default function CallsPage() {
 
         const { data, error: fetchErr } = await supabase
           .from('calls')
-          .select('*')
+          .select('*, patients(full_name)')
           .order('call_started_at', { ascending: false })
           .limit(500)
 
@@ -421,14 +421,13 @@ export default function CallsPage() {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'calls' },
         (payload: RealtimePostgresChangesPayload<Call>) => {
-          if (payload.eventType === 'INSERT') {
-            setCalls((prev) => [payload.new as Call, ...prev].slice(0, 500))
-          } else if (payload.eventType === 'UPDATE') {
-            setCalls((prev) =>
-              prev.map((c) => (c.id === (payload.new as Call).id ? (payload.new as Call) : c))
-            )
-          } else if (payload.eventType === 'DELETE') {
+          if (payload.eventType === 'DELETE') {
             setCalls((prev) => prev.filter((c) => c.id !== (payload.old as { id: string }).id))
+          } else {
+            // Realtime payloads don't carry embedded relations, so payload.new
+            // has no patients.full_name. Refetch (silent) so the join stays
+            // populated for inserted/updated rows.
+            fetchCalls(true)
           }
         }
       )

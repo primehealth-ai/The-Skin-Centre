@@ -9,7 +9,6 @@ type ClaimedMissedCallJob = {
   id: string
   patient_id: string | null
   patient_phone: string
-  patient_name: string | null
   service_type: string | null
 }
 
@@ -93,9 +92,21 @@ export async function GET(req: NextRequest) {
           continue
         }
 
+        // Resolve the live patient name from patients.full_name — missed_calls no
+        // longer stores a denormalized patient_name snapshot.
+        let livePatientName = 'Patient'
+        if (mc.patient_id) {
+          const { data: patientRow } = await supabase
+            .from('patients')
+            .select('full_name')
+            .eq('id', mc.patient_id)
+            .maybeSingle()
+          livePatientName = patientRow?.full_name || 'Patient'
+        }
+
         await sendMissedCallWhatsApp({
           phone: normalizedPhone,
-          patientName: mc.patient_name || 'Patient',
+          patientName: livePatientName,
           serviceType: mc.service_type || 'General',
           missedCallId: mc.id,
         })

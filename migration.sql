@@ -54,3 +54,60 @@ BEGIN
   RETURNING webhook_queue.id, webhook_queue.payload, webhook_queue.attempts;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- 6. Patient-name de-normalization cleanup (run BEFORE deploying the knowlarity
+--    fix that stops writing calls.patient_name / missed_calls.patient_name).
+--    Names are now read live from patients.full_name via patient_id.
+--
+--    NOTE: This is a corrected, FK-aware version of the originally-proposed
+--    two-statement cleanup, which could not run as-is because:
+--      (a) patients.phone is UNIQUE, so normalizing a dirty phone (e.g.
+--          '%2b917…' or '+917…') onto an existing clean '917…' row raises a
+--          unique_violation — the duplicates must be MERGED before normalizing.
+--      (b) calls, missed_calls, whatsapp_messages, patient_consents and
+--          patient_photos all FK-reference patients(id) with the default
+--          RESTRICT, so a 'New Patient' duplicate cannot be DELETEd while any
+--          child row still points at it — children must be repointed first.
+--    Wrapped in a transaction; review against a backup/staging DB before prod.
+
+BEGIN;
+
+-- 6a. Choose one survivor per canonical phone (preferring a real, staff-edited
+--     name) and map every other same-number row to it.
+CREATE TEMP TABLE patient_remap ON COMMIT DROP AS
+WITH norm AS (
+  SELECT id, full_name,
+         regexp_replace(phone, '(%2[bB]|\+)', '', 'g') AS canon_phone
+  FROM public.patients
+),
+survivor AS (
+  SELECT DISTINCT ON (canon_phone)
+    canon_phone,
+    id AS survivor_id
+  FROM norm
+  ORDER BY canon_phone,
+           (full_name IS DISTINCT FROM 'New Patient') DESC,  -- keep a real name
+           id                                                 -- deterministic
+)
+SELECT n.id AS old_id, s.survivor_id
+FROM norm n
+JOIN survivor s ON s.canon_phone = n.canon_phone
+WHERE n.id <> s.survivor_id;
+
+-- 6b. Repoint every child table from the loser rows to their survivor.
+UPDATE public.calls            c  SET patient_id = r.survivor_id FROM patient_remap r WHERE c.patient_id  = r.old_id;
+UPDATE public.missed_calls     m  SET patient_id = r.survivor_id FROM patient_remap r WHERE m.patient_id  = r.old_id;
+UPDATE public.whatsapp_messages w SET patient_id = r.survivor_id FROM patient_remap r WHERE w.patient_id  = r.old_id;
+UPDATE public.patient_consents pc SET patient_id = r.survivor_id FROM patient_remap r WHERE pc.patient_id = r.old_id;
+UPDATE public.patient_photos   pp SET patient_id = r.survivor_id FROM patient_remap r WHERE pp.patient_id = r.old_id;
+
+-- 6c. Delete the now-orphaned duplicate patients.
+DELETE FROM public.patients p USING patient_remap r WHERE p.id = r.old_id;
+
+-- 6d. Normalize the surviving phones to canonical 91XXXXXXXXXX (no collisions
+--     remain after the merge), matching the webhook's onConflict:'phone' key.
+UPDATE public.patients
+SET phone = regexp_replace(phone, '(%2[bB]|\+)', '', 'g')
+WHERE phone ~ '(%2[bB]|\+)';
+
+COMMIT;

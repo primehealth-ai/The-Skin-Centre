@@ -15,10 +15,10 @@ import {
 } from 'lucide-react'
 import { formatDate, formatDuration, formatPhoneNumber } from '@/lib/utils/formatters'
 import { getCallStatusVariant, getCallStatusLabel } from '@/lib/utils/status'
-import { Database } from '@/types/database'
+import { CallWithPatient } from '@/types/database'
 import { useRouter } from 'next/navigation'
 
-type Call = Database['public']['Tables']['calls']['Row']
+type Call = CallWithPatient
 
 interface CallDetailModalProps {
   isOpen: boolean
@@ -59,7 +59,7 @@ export function CallDetailModal({ isOpen, onClose, call }: CallDetailModalProps)
             <div className="flex flex-col">
               <span className="text-[10px] text-slate-400 dark:text-slate-500 font-extrabold uppercase">Patient Name</span>
               <span className="text-sm font-extrabold text-slate-800 dark:text-slate-100">
-                {call.patient_name || 'Anonymous Patient'}
+                {call.patients?.full_name || 'Anonymous Patient'}
               </span>
             </div>
           </div>

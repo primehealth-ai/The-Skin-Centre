@@ -178,7 +178,7 @@ CREATE TABLE public.webhook_queue (
 );
 CREATE TABLE public.forwarding_health (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
-  clinic_number_id uuid,
+  clinic_number_id uuid UNIQUE,
   last_call_received_at timestamp with time zone,
   status text DEFAULT 'unknown'::text,
   checked_at timestamp with time zone DEFAULT now(),

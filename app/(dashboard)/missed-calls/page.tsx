@@ -19,10 +19,10 @@ import {
 } from 'lucide-react'
 import { useMissedCalls } from '@/hooks/useMissedCalls'
 import { MissedCallsTable } from '@/components/missed-calls/MissedCallsTable'
-import { Database } from '@/types/database'
+import { MissedCallWithPatient } from '@/types/database'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-type MissedCall = Database['public']['Tables']['missed_calls']['Row']
+type MissedCall = MissedCallWithPatient
 type MissedCallStatus = MissedCall['status']
 
 type StatusFilter = 'all' | MissedCallStatus
@@ -91,7 +91,7 @@ function matchesSearch(mc: MissedCall, query: string): boolean {
   if (!query.trim()) return true
   const q = query.toLowerCase()
   return (
-    (mc.patient_name ?? '').toLowerCase().includes(q) ||
+    (mc.patients?.full_name ?? '').toLowerCase().includes(q) ||
     mc.patient_phone.includes(q)
   )
 }
@@ -326,7 +326,7 @@ export default function MissedCallsPage() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               to: mc.patient_phone,
-              message: `Hi${mc.patient_name ? ` ${mc.patient_name}` : ''}! You recently called The Skin Centre. We're sorry we missed you. Please reply here or call us back — we'd love to help. 🌿`,
+              message: `Hi${mc.patients?.full_name ? ` ${mc.patients.full_name}` : ''}! You recently called The Skin Centre. We're sorry we missed you. Please reply here or call us back — we'd love to help. 🌿`,
               missedCallId: mc.id,
             }),
           })

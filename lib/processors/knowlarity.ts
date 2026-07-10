@@ -35,7 +35,7 @@ function resolveKnowlarityStatus(payload: any): {
 
   // Normalise agent_number: store null when Knowlarity sends "False" or empty
   const agentNumber =
-    agentAnswered ? String(rawAgentNumber).trim() : null
+    agentAnswered ? decodePhone(String(rawAgentNumber)) : null
 
   return { isMissedCall, finalCallStatus, agentNumber, callTransferStatus }
 }
@@ -67,11 +67,13 @@ function parseDuration(raw: string | null | undefined): number | null {
  * then strip leading + so we store as 917XXXXXXXXX format.
  */
 function decodePhone(raw: string): string {
+  let str = String(raw).trim()
   try {
-    return decodeURIComponent(raw).replace(/^\+/, '').replace(/^0/, '').trim()
+    str = decodeURIComponent(str).trim()
   } catch {
-    return raw.replace(/^\+/, '').replace(/^0/, '').trim()
+    // Ignore decode errors, fallback to manual replace
   }
+  return str.replace(/^(?:%2[bB]|\+)/, '').replace(/^0/, '').trim()
 }
 
 export async function processKnowlarityWebhook(payload: any): Promise<void> {
@@ -118,22 +120,37 @@ export async function processKnowlarityWebhook(payload: any): Promise<void> {
       .eq('exophone', virtualNumber)
       .maybeSingle()
 
-    const { data: patient, error: patientError } = await supabase
+    // Bug 1 fix: never overwrite full_name on repeat calls, and stay idempotent
+    // even when an existing patient row has a dirty (encoded) phone that a plain
+    // equality lookup would miss. upsert(onConflict:'phone', ignoreDuplicates:true)
+    // INSERTs only when the phone is genuinely new; when the row already exists it
+    // is left untouched (its staff-edited full_name is preserved) and the upsert
+    // returns null. We then fetch the existing row to resolve its id.
+    const { data: upsertedPatient, error: patientUpsertError } = await supabase
       .from('patients')
       .upsert(
-        {
-          phone: normalizedPhone,
-          full_name: payload?.patient_name ?? payload?.caller_name ?? 'New Patient',
-        },
-        {
-          onConflict: 'phone',
-        }
+        { phone: normalizedPhone, full_name: 'New Patient' },
+        { onConflict: 'phone', ignoreDuplicates: true }
       )
-      .select('id, full_name, phone')
-      .single()
+      .select('id, full_name')
+      .maybeSingle()
 
-    if (patientError || !patient) {
-      throw patientError || new Error('Failed to upsert patient record')
+    if (patientUpsertError) {
+      throw patientUpsertError
+    }
+
+    const patient =
+      upsertedPatient ??
+      (
+        await supabase
+          .from('patients')
+          .select('id, full_name')
+          .eq('phone', normalizedPhone)
+          .maybeSingle()
+      ).data
+
+    if (!patient) {
+      throw new Error(`Failed to resolve patient record for phone ${normalizedPhone}`)
     }
 
     // Resolve call status from agent_number + call_transfer_status.
@@ -151,7 +168,8 @@ export async function processKnowlarityWebhook(payload: any): Promise<void> {
     // than storing an empty string that would UNIQUE-violate on the second empty payload.
     const rawCallSid = payload?.call_uuid ?? payload?.call_sid ?? payload?.CallSid ?? payload?.callSid ?? ''
     const callSid: string = rawCallSid.trim() !== '' ? rawCallSid.trim() : crypto.randomUUID()
-    const dialWhomNumber = payload?.dial_whom_number ?? payload?.DialWhomNumber ?? null
+    const rawDialWhomNumber = payload?.dial_whom_number ?? payload?.DialWhomNumber ?? ''
+    const dialWhomNumber = rawDialWhomNumber ? decodePhone(String(rawDialWhomNumber)) : null
 
     // Fix #6: recording_url — treat "None" / "" as null
     const rawRecordingUrl = payload?.recording_url ?? payload?.RecordingUrl ?? null
@@ -209,7 +227,6 @@ export async function processKnowlarityWebhook(payload: any): Promise<void> {
           agent_number: agentNumber,
           call_transfer_status: callTransferStatus,
           incoming_number: virtualNumber,
-          patient_name: patient.full_name ?? payload?.patient_name ?? payload?.caller_name ?? 'New Patient',
         },
         {
           onConflict: 'call_sid',
@@ -230,8 +247,9 @@ export async function processKnowlarityWebhook(payload: any): Promise<void> {
       return
     }
 
-    const patientName =
-      patient.full_name ?? payload?.patient_name ?? payload?.caller_name ?? 'New Patient'
+    // Live name is used only for the outbound WhatsApp greeting — never persisted
+    // back onto missed_calls. The name is always read from patients.full_name.
+    const patientName = patient.full_name ?? 'New Patient'
 
     // Bug 3 fix (defensive guard):
     // patient_phone MUST always come from normalizedPhone (the decoded, validated
@@ -240,24 +258,35 @@ export async function processKnowlarityWebhook(payload: any): Promise<void> {
     // than storing a raw template string or undefined value.
     const safePatientPhone = normalizedPhone.trim() !== '' ? normalizedPhone : 'unknown'
 
+    // Bug 2 fix: use upsert with ignoreDuplicates:true so that Knowlarity Log Push
+    // retries (same call_id, which has a UNIQUE constraint) silently skip the
+    // duplicate instead of crashing and retrying indefinitely.
     const { data: missedCall, error: missedCallError } = await supabase
       .from('missed_calls')
-      .insert({
-        call_id: newCall.id,
-        patient_id: patient.id,
-        patient_phone: safePatientPhone,
-        patient_name: patientName,
-        incoming_number: virtualNumber,
-        service_type: clinicNumber?.service_name ?? null,
-        missed_at: callStartedAt,
-        status: 'pending',
-        send_after: callStartedAt,
-      })
+      .upsert(
+        {
+          call_id: newCall.id,
+          patient_id: patient.id,
+          patient_phone: safePatientPhone,
+          incoming_number: virtualNumber,
+          service_type: clinicNumber?.service_name ?? null,
+          missed_at: callStartedAt,
+          status: 'pending',
+          send_after: callStartedAt,
+        },
+        { onConflict: 'call_id', ignoreDuplicates: true }
+      )
       .select('id')
-      .single()
+      .maybeSingle()
 
-    if (missedCallError || !missedCall) {
-      throw missedCallError || new Error('Failed to insert missed call record')
+    if (missedCallError) {
+      throw missedCallError
+    }
+
+    // If missedCall is null it means the row already existed (ignoreDuplicates) —
+    // a Knowlarity retry. No WhatsApp send needed; exit cleanly.
+    if (!missedCall) {
+      return
     }
 
     // IST midnight boundary calculation

@@ -5,10 +5,10 @@ import { Button } from '../ui/Button'
 import { PhoneMissed, ArrowUpRight, Check } from 'lucide-react'
 import { formatDate, formatPhoneNumber } from '@/lib/utils/formatters'
 import { getMissedCallStatusVariant, getMissedCallStatusLabel } from '@/lib/utils/status'
-import { Database } from '@/types/database'
+import { MissedCallWithPatient } from '@/types/database'
 import Link from 'next/link'
 
-type MissedCall = Database['public']['Tables']['missed_calls']['Row']
+type MissedCall = MissedCallWithPatient
 
 interface MissedCallCardProps {
   missedCall: MissedCall
@@ -25,7 +25,7 @@ export function MissedCallCard({ missedCall, onResolve }: MissedCallCardProps) {
           </div>
           <div className="flex flex-col gap-0.5">
             <h4 className="font-bold text-slate-800 dark:text-slate-100 text-sm">
-              {missedCall.patient_name || 'New Patient'}
+              {missedCall.patients?.full_name || 'New Patient'}
             </h4>
             <span className="text-[10px] text-slate-400 dark:text-slate-500 font-extrabold">
               {formatPhoneNumber(missedCall.patient_phone)}

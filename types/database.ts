@@ -461,3 +461,20 @@ export interface Database {
     }
   }
 }
+
+/**
+ * `calls` and `missed_calls` no longer store a denormalized `patient_name`
+ * snapshot. The live name is always read from `patients.full_name`, embedded via
+ * the `patient_id` foreign key with `.select('*, patients(full_name)')`.
+ * Realtime payloads omit embedded relations, so `patients` may be absent on
+ * optimistically-inserted rows until the next refetch — hence it is optional.
+ */
+export type PatientNameJoin = {
+  patients?: { full_name: string | null } | null
+}
+
+export type CallWithPatient =
+  Database['public']['Tables']['calls']['Row'] & PatientNameJoin
+
+export type MissedCallWithPatient =
+  Database['public']['Tables']['missed_calls']['Row'] & PatientNameJoin
