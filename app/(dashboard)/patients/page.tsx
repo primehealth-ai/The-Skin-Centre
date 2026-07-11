@@ -78,18 +78,24 @@ export default function PatientsPage() {
       setSubmitting(true)
       setError(null)
       const tagList = tags.split(',').map((t) => t.trim()).filter((t) => t !== '')
-      
+
+      // Upsert on the UNIQUE phone so registering a number that already exists
+      // (commonly a webhook-created "New Patient") updates instead of throwing a
+      // unique_violation. Optional fields are only included when provided, so a
+      // conflict update never clobbers existing data with empty values.
+      const record: Record<string, unknown> = {
+        full_name: fullName,
+        phone: normalizedPatientPhone,
+        gender,
+      }
+      if (email) record.email = email
+      if (dob) record.date_of_birth = dob
+      if (tagList.length > 0) record.tags = tagList
+      if (notes) record.internal_notes = notes
+
       const { error: insertErr } = await supabase
         .from('patients')
-        .insert({
-          full_name: fullName,
-          phone: normalizedPatientPhone,
-          email: email || null,
-          gender,
-          date_of_birth: dob || null,
-          tags: tagList.length > 0 ? tagList : null,
-          internal_notes: notes || null,
-        })
+        .upsert(record, { onConflict: 'phone', ignoreDuplicates: false })
         .select()
         .single()
 

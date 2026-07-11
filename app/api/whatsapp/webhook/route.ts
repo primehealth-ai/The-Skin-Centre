@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from 'crypto'
-import { normalizePhone } from '@/lib/knowlarity/client'
+import { normalizePhone } from '@/lib/utils/phone'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logError } from '@/lib/utils/logError'
 
@@ -69,7 +69,14 @@ export async function POST(request: Request) {
       return new Response('OK', { status: 200 })
     }
 
+    // Canonical normalizer (lib/utils/phone) returns null for unrecognised input.
+    // Guard here so the opt-out key we store/lookup is always canonical and we never
+    // attempt a NOT NULL patient_phone insert with a null value.
     const patientPhone = normalizePhone(message.from ?? '')
+    if (!patientPhone) {
+      await logError('webhook', new Error(`Unrecognised WhatsApp sender phone: ${message.from ?? '(empty)'}`))
+      return new Response('OK', { status: 200 })
+    }
     const messageText = message.text?.body ?? ''
     const keyword = messageText.trim().toLowerCase()
     const isOptOutKeyword = keyword === 'stop' || keyword === 'unsubscribe'

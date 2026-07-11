@@ -1,5 +1,6 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { logError } from '@/lib/utils/logError'
+import { normalizePhone } from '@/lib/utils/phone'
 
 interface SendMissedCallWhatsAppParams {
   phone: string
@@ -91,10 +92,18 @@ export async function sendMissedCallWhatsApp(
   try {
     const { phone, patientName, serviceType, missedCallId } = params
 
+    // Canonicalise via the single source of truth (lib/utils/phone) so the opt-out
+    // key checked here matches the key stored by the inbound WhatsApp webhook.
+    // Fail closed on an unrecognised number rather than messaging the wrong person.
+    const dbPhone = normalizePhone(phone)
+    if (!dbPhone) {
+      throw new Error(`Invalid phone number for WhatsApp send: ${phone}`)
+    }
+
     const { data: optedOut, error: optedOutError } = await supabase
       .from('opted_out_numbers')
       .select('id')
-      .eq('phone', phone)
+      .eq('phone', dbPhone)
       .maybeSingle()
 
     if (optedOutError) {
@@ -143,7 +152,7 @@ export async function sendMissedCallWhatsApp(
       .from('whatsapp_messages')
       .insert({
         patient_id: missedCall?.patient_id ?? null,
-        patient_phone: phone,
+        patient_phone: dbPhone,
         patient_name: patientName,
         direction: 'outbound',
         message_text: templateName,

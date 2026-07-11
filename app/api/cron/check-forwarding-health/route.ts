@@ -1,6 +1,8 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { logError } from '@/lib/utils/logError'
 
+export const maxDuration = 60
+
 export async function GET() {
   return checkForwardingHealth()
 }

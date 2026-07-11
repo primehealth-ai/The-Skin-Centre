@@ -4,6 +4,7 @@ import { logError } from '@/lib/utils/logError'
 import { sendMissedCallWhatsApp } from '@/lib/whatsapp/send'
 
 export const dynamic = 'force-dynamic'
+export const maxDuration = 60
 
 type ClaimedMissedCallJob = {
   id: string

@@ -28,7 +28,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     // 2. Parse body
     const body = await req.json()
-    const { fullName, phone } = body
+    const { fullName, phone, email, dateOfBirth } = body
 
     if (!fullName || !phone) {
       return NextResponse.json({ error: 'Missing fullName or phone' }, { status: 400 })
@@ -39,19 +39,27 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ error: 'Invalid phone number format' }, { status: 400 })
     }
 
-    // 3. Write record using service client
+    // 3. Write record using service client.
+    // Upsert on the UNIQUE phone so re-registering an existing caller (e.g. a
+    // "New Patient" row auto-created by the webhook) updates instead of crashing
+    // with a 23505 unique_violation. Only include optional fields when actually
+    // provided, so a conflict update never overwrites existing data with empties.
+    const record: Record<string, unknown> = {
+      full_name: fullName.trim(),
+      phone: dbPhone,
+    }
+    if (email) record.email = email
+    if (dateOfBirth) record.date_of_birth = dateOfBirth
+
     const supabase = createServiceClient()
     const { data: patient, error: insertError } = await supabase
       .from('patients')
-      .insert({
-        full_name: fullName.trim(),
-        phone: dbPhone,
-      })
+      .upsert(record, { onConflict: 'phone', ignoreDuplicates: false })
       .select('id, full_name, phone')
       .single()
 
     if (insertError || !patient) {
-      throw insertError ?? new Error('Failed to insert patient record')
+      throw insertError ?? new Error('Failed to upsert patient record')
     }
 
     return NextResponse.json({ success: true, patient }, { status: 201 })

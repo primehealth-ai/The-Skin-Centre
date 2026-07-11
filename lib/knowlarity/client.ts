@@ -1,5 +1,12 @@
 import { createServiceClient } from '@/lib/supabase/server'
 
+/**
+ * @deprecated Do NOT use for opt-out keys or any patient-facing phone storage.
+ * This lenient variant does not add the country code for 10-digit inputs, which
+ * caused opt-out store/check key divergence. The single canonical normalizer is
+ * `normalizePhone` in `lib/utils/phone.ts` — use that everywhere instead.
+ * Retained only for the internal `getServiceType` clinic-number lookup below.
+ */
 export function normalizePhone(phone: string): string {
   const trimmed = phone.trim()
 

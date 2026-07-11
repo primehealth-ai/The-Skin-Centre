@@ -50,8 +50,19 @@ export async function POST(req: NextRequest) {
       .eq('phone', dbPhone)
       .maybeSingle()
 
+    // Fail CLOSED: if opt-out status cannot be determined, never proceed with the
+    // send. Matches the automated path in lib/whatsapp/send.ts, which throws on
+    // an opt-out query error rather than sending to a possibly-opted-out patient.
     if (optedOutError) {
-      console.error('WhatsApp send opt-out check error:', optedOutError.message)
+      await logError('whatsapp', optedOutError, {
+        route: 'manual-send',
+        step: 'opt_out_check',
+        phone: dbPhone,
+      })
+      return NextResponse.json(
+        { error: 'Unable to verify opt-out status. Send aborted.' },
+        { status: 500 }
+      )
     }
 
     if (optedOut) {
