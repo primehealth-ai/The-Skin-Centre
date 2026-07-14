@@ -8,7 +8,7 @@ type CallStatus = 'answered' | 'missed'
  * Knowlarity always sends call_status="Connected" regardless of outcome.
  * The real signal is agent_number + call_transfer_status:
  *   - If agent_number is present (not "False" / empty) → agent answered.
- *   - If call_transfer_status is "Missed" or "Abandoned" → missed.
+ *   - If call_transfer_status is "Missed", "Abandoned", or "Not Connected" → missed.
  *   - If no agent answered → missed.
  */
 function resolveKnowlarityStatus(payload: any): {
@@ -29,6 +29,7 @@ function resolveKnowlarityStatus(payload: any): {
   const isMissedCall =
     transferStatus === 'Missed' ||
     transferStatus === 'Abandoned' ||
+    transferStatus === 'Not Connected' ||
     !agentAnswered
 
   const finalCallStatus: CallStatus = isMissedCall ? 'missed' : 'answered'
