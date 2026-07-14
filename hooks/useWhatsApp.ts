@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Database } from '@/types/database'
-import { RealtimePostgresChangesPayload } from '@supabase/supabase-js'
+import { RealtimeChannel, RealtimePostgresChangesPayload } from '@supabase/supabase-js'
 
 type Message = Database['public']['Tables']['whatsapp_messages']['Row']
 
@@ -39,40 +39,51 @@ export function useWhatsApp(activePhone?: string) {
       }
     }
 
-    fetchMessages()
-
     // Sanitize phone input for safe channel identifier naming constraints
     const safeChannelPhone = activePhone.replace(/[^a-zA-Z0-9]/g, '_')
+    const channelName = `whatsapp_messages_${safeChannelPhone}`
 
-    // Realtime channel for this patient's messages
-    const channel = supabase
-      .channel(`whatsapp_messages_${safeChannelPhone}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'whatsapp_messages',
-          filter: `patient_phone=eq.${activePhone}`,
-        },
-        (payload: RealtimePostgresChangesPayload<Message>) => {
-          if (payload.eventType === 'INSERT') {
-            setMessages((prev) => {
-              // Ensure we don't insert duplicate IDs
-              if (prev.some((m) => m.id === payload.new.id)) return prev
-              return [...prev, payload.new as Message]
-            })
-          } else if (payload.eventType === 'UPDATE') {
-            setMessages((prev) =>
-              prev.map((m) => (m.id === payload.new.id ? (payload.new as Message) : m))
-            )
+    async function setup() {
+      // Fix 1: Deduplicate channel on singleton — remove any existing slot for this
+      // phone before subscribing, preventing channel exhaustion when switching patients.
+      const existing = supabase.getChannels().find((c: RealtimeChannel) => c.topic === `realtime:${channelName}`)
+      if (existing) await supabase.removeChannel(existing)
+
+      fetchMessages()
+
+      // Realtime channel for this patient's messages
+      channel = supabase
+        .channel(channelName)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'whatsapp_messages',
+            filter: `patient_phone=eq.${activePhone}`,
+          },
+          (payload: RealtimePostgresChangesPayload<Message>) => {
+            if (payload.eventType === 'INSERT') {
+              setMessages((prev) => {
+                // Ensure we don't insert duplicate IDs
+                if (prev.some((m) => m.id === payload.new.id)) return prev
+                return [...prev, payload.new as Message]
+              })
+            } else if (payload.eventType === 'UPDATE') {
+              setMessages((prev) =>
+                prev.map((m) => (m.id === payload.new.id ? (payload.new as Message) : m))
+              )
+            }
           }
-        }
-      )
-      .subscribe()
+        )
+        .subscribe()
+    }
+
+    let channel: ReturnType<typeof supabase.channel> | undefined
+    setup()
 
     return () => {
-      supabase.removeChannel(channel)
+      if (channel) supabase.removeChannel(channel)
     }
   }, [activePhone, supabase])
 

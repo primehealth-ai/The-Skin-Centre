@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { RealtimeChannel } from '@supabase/supabase-js'
 import StatCard from '@/components/dashboard/StatCard'
 import { Phone, PhoneIncoming, Activity, MessageSquare } from 'lucide-react'
 
@@ -29,7 +30,9 @@ export default function LiveTodayStats({
   const [whatsappSent, setWhatsappSent] = useState(initialWhatsappSent)
 
   // Re-fetch all four counters from the DB in one shot
-  const refetchCounts = async () => {
+  // Fix 3: wrapped in useCallback with correct deps so the Realtime handler always
+  // closes over the current startOfTodayISO value, not a stale first-render copy.
+  const refetchCounts = useCallback(async () => {
     const todayISO = startOfTodayISO
     const [
       { count: tc },
@@ -46,31 +49,50 @@ export default function LiveTodayStats({
     if (mc !== null) setMissedCalls(mc)
     if (rc !== null) setRecovered(rc)
     if (ws !== null) setWhatsappSent(ws)
-  }
+  }, [supabase, startOfTodayISO])
 
   useEffect(() => {
-    const callsChannel = supabase
-      .channel('live-today-stats-calls')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'calls' }, refetchCounts)
-      .subscribe()
+    async function setup() {
+      // Fix 1: Deduplicate all 3 channels on singleton — remove any existing slots
+      // before subscribing, preventing channel exhaustion across page navigations.
+      const channelNames = [
+        'realtime:live-today-stats-calls',
+        'realtime:live-today-stats-missed',
+        'realtime:live-today-stats-whatsapp',
+      ]
+      await Promise.all(
+        supabase.getChannels()
+          .filter((c: RealtimeChannel) => channelNames.includes(c.topic))
+          .map((c: RealtimeChannel) => supabase.removeChannel(c))
+      )
 
-    const missedChannel = supabase
-      .channel('live-today-stats-missed')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'missed_calls' }, refetchCounts)
-      .subscribe()
+      callsChannel = supabase
+        .channel('live-today-stats-calls')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'calls' }, refetchCounts)
+        .subscribe()
 
-    const waChannel = supabase
-      .channel('live-today-stats-whatsapp')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'whatsapp_messages' }, refetchCounts)
-      .subscribe()
+      missedChannel = supabase
+        .channel('live-today-stats-missed')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'missed_calls' }, refetchCounts)
+        .subscribe()
+
+      waChannel = supabase
+        .channel('live-today-stats-whatsapp')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'whatsapp_messages' }, refetchCounts)
+        .subscribe()
+    }
+
+    let callsChannel: ReturnType<typeof supabase.channel> | undefined
+    let missedChannel: ReturnType<typeof supabase.channel> | undefined
+    let waChannel: ReturnType<typeof supabase.channel> | undefined
+    setup()
 
     return () => {
-      supabase.removeChannel(callsChannel)
-      supabase.removeChannel(missedChannel)
-      supabase.removeChannel(waChannel)
+      if (callsChannel) supabase.removeChannel(callsChannel)
+      if (missedChannel) supabase.removeChannel(missedChannel)
+      if (waChannel) supabase.removeChannel(waChannel)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [refetchCounts])
 
   const recoveryRate = missedCalls > 0 ? Math.round((recovered / missedCalls) * 100) : 0
 

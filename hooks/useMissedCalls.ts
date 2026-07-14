@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { MissedCallWithPatient } from '@/types/database'
-import { RealtimePostgresChangesPayload } from '@supabase/supabase-js'
+import { RealtimeChannel, RealtimePostgresChangesPayload } from '@supabase/supabase-js'
 
 type MissedCall = MissedCallWithPatient
 type MissedCallStatus = MissedCall['status']
@@ -39,28 +39,38 @@ export function useMissedCalls() {
   )
 
   useEffect(() => {
-    fetchMissedCalls()
+    async function setup() {
+      // Fix 1: Deduplicate channel on singleton — remove any existing slot before
+      // subscribing, preventing channel exhaustion across page navigations.
+      const existing = supabase.getChannels().find((c: RealtimeChannel) => c.topic === 'realtime:missed_calls_changes')
+      if (existing) await supabase.removeChannel(existing)
 
-    // Realtime channel listener. Realtime payloads omit embedded relations, so a
-    // spliced payload.new would drop patients.full_name — refetch (silent) on
-    // INSERT/UPDATE to keep the join populated. DELETE can prune locally.
-    const channel = supabase
-      .channel('missed_calls_changes')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'missed_calls' },
-        (payload: RealtimePostgresChangesPayload<MissedCall>) => {
-          if (payload.eventType === 'DELETE') {
-            setMissedCalls((prev) => prev.filter((c) => c.id !== (payload.old as { id: string }).id))
-          } else {
-            fetchMissedCalls(true)
+      fetchMissedCalls()
+
+      // Realtime channel listener. Realtime payloads omit embedded relations, so a
+      // spliced payload.new would drop patients.full_name — refetch (silent) on
+      // INSERT/UPDATE to keep the join populated. DELETE can prune locally.
+      channel = supabase
+        .channel('missed_calls_changes')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'missed_calls' },
+          (payload: RealtimePostgresChangesPayload<MissedCall>) => {
+            if (payload.eventType === 'DELETE') {
+              setMissedCalls((prev) => prev.filter((c) => c.id !== (payload.old as { id: string }).id))
+            } else {
+              fetchMissedCalls(true)
+            }
           }
-        }
-      )
-      .subscribe()
+        )
+        .subscribe()
+    }
+
+    let channel: ReturnType<typeof supabase.channel> | undefined
+    setup()
 
     return () => {
-      supabase.removeChannel(channel)
+      if (channel) supabase.removeChannel(channel)
     }
   }, [supabase, fetchMissedCalls])
 

@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { RealtimeChannel } from '@supabase/supabase-js'
 import Link from 'next/link'
 import { PhoneIncoming, CheckCircle2, ArrowRight } from 'lucide-react'
 
@@ -24,7 +25,9 @@ export default function LiveRecentMissedQueue({ initialRows }: LiveRecentMissedQ
 
   const [rows, setRows] = useState<MissedCallRow[]>(initialRows)
 
-  const refetchQueue = async () => {
+  // Fix 3: wrapped in useCallback with correct deps so the Realtime handler always
+  // uses the current supabase reference, not a stale first-render copy.
+  const refetchQueue = useCallback(async () => {
     const { data } = await supabase
       .from('missed_calls')
       .select('id, patient_phone, service_type, missed_at, status, patients(full_name)')
@@ -32,19 +35,28 @@ export default function LiveRecentMissedQueue({ initialRows }: LiveRecentMissedQ
       .order('missed_at', { ascending: false })
       .limit(5)
     if (data) setRows(data as MissedCallRow[])
-  }
+  }, [supabase])
 
   useEffect(() => {
-    const channel = supabase
-      .channel('live-recent-missed-queue')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'missed_calls' }, refetchQueue)
-      .subscribe()
+    async function setup() {
+      // Fix 1: Deduplicate channel on singleton — remove any existing slot before
+      // subscribing, preventing channel exhaustion across page navigations.
+      const existing = supabase.getChannels().find((c: RealtimeChannel) => c.topic === 'realtime:live-recent-missed-queue')
+      if (existing) await supabase.removeChannel(existing)
+
+      channel = supabase
+        .channel('live-recent-missed-queue')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'missed_calls' }, refetchQueue)
+        .subscribe()
+    }
+
+    let channel: ReturnType<typeof supabase.channel> | undefined
+    setup()
 
     return () => {
-      supabase.removeChannel(channel)
+      if (channel) supabase.removeChannel(channel)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [refetchQueue])
 
   return (
     <div className="divide-y divide-slate-50 dark:divide-slate-800/60">
