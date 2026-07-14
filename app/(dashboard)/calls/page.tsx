@@ -391,6 +391,14 @@ export default function CallsPage() {
 
         setError(null)
 
+        // Guard: expired session → redirect to login instead of an RLS-empty
+        // result that would leave the table blank with no explanation.
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session) {
+          window.location.href = '/login'
+          return
+        }
+
         const { data, error: fetchErr } = await supabase
           .from('calls')
           .select('*, patients(full_name)')
@@ -558,6 +566,21 @@ export default function CallsPage() {
                   </tbody>
                 </table>
               </div>
+            </div>
+          ) : !error && calls.length === 0 ? (
+            /* Loaded, no error, nothing returned — explicit recovery path */
+            <div className="flex flex-col items-center justify-center gap-4 py-16 text-center">
+              <Phone className="h-8 w-8 text-slate-300 dark:text-slate-600" />
+              <p className="text-sm font-bold text-slate-500 dark:text-slate-400">
+                No calls found.
+              </p>
+              <button
+                onClick={() => fetchCalls(true)}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white text-xs font-extrabold transition-all"
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+                Retry
+              </button>
             </div>
           ) : (
             <CallsTable calls={filteredCalls} onViewDetails={setSelectedCall} />

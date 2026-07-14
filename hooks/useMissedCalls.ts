@@ -20,6 +20,15 @@ export function useMissedCalls() {
       try {
         if (!silent) setLoading(true)
         setError(null)
+
+        // Guard: bail to login if the session has expired rather than run an
+        // RLS-empty query that leaves the queue looking empty.
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session) {
+          window.location.href = '/login'
+          return
+        }
+
         const { data, error: fetchErr } = await supabase
           .from('missed_calls')
           .select('*, patients(full_name)')
@@ -127,6 +136,8 @@ export function useMissedCalls() {
     missedCalls,
     loading,
     error,
+    // Exposed so pages can offer a manual Retry without a full page refresh.
+    refetch: fetchMissedCalls,
     assignMissedCall,
     updateStatus,
   }

@@ -205,7 +205,7 @@ function SelectDropdown<T extends string>({
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function MissedCallsPage() {
-  const { missedCalls, loading, error, updateStatus } = useMissedCalls()
+  const { missedCalls, loading, error, refetch, updateStatus } = useMissedCalls()
 
   // Filter state
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
@@ -595,6 +595,20 @@ export default function MissedCallsPage() {
             <div className="bg-slate-900/60 border border-slate-800/60 rounded-2xl p-16 flex flex-col items-center justify-center gap-4">
               <RefreshCw className="h-8 w-8 text-slate-600 animate-spin" />
               <p className="text-sm font-bold text-slate-500">Loading missed calls…</p>
+            </div>
+          ) : !loading && !error && missedCalls.length === 0 ? (
+            // Fully loaded, no error, nothing returned: give staff an explicit
+            // recovery path instead of a bare empty grid.
+            <div className="bg-slate-900/60 border border-slate-800/60 rounded-2xl p-16 flex flex-col items-center justify-center gap-4">
+              <PhoneMissed className="h-8 w-8 text-slate-600" />
+              <p className="text-sm font-bold text-slate-400">No missed calls found.</p>
+              <button
+                onClick={() => void refetch()}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white text-xs font-extrabold transition-all"
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+                Retry
+              </button>
             </div>
           ) : (
             <div className="relative">

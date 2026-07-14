@@ -23,6 +23,16 @@ export function useCalls() {
         try {
           setLoading(true)
           setError(null)
+
+          // Guard: if the session is gone (refresh token expired after a long
+          // absence), redirect to login instead of firing an RLS-empty query
+          // that would leave the UI stuck on an empty state.
+          const { data: { session } } = await supabase.auth.getSession()
+          if (!session) {
+            window.location.href = '/login'
+            return
+          }
+
           const { data, error: fetchErr } = await supabase
             .from('calls')
             .select('*')
