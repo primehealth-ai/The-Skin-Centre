@@ -27,7 +27,7 @@ export function MissedCallCard({ missedCall, onResolve }: MissedCallCardProps) {
             <h4 className="font-bold text-slate-800 dark:text-slate-100 text-sm">
               {missedCall.patients?.full_name || 'New Patient'}
             </h4>
-            <span className="text-[10px] text-slate-400 dark:text-slate-500 font-extrabold">
+            <span className="text-sm font-medium text-gray-200">
               {formatPhoneNumber(missedCall.patient_phone)}
             </span>
           </div>

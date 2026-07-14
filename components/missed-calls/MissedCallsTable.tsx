@@ -163,7 +163,7 @@ export function MissedCallsTable({
                             <span className="font-bold text-slate-100">
                               {mc.patients?.full_name || 'New Patient'}
                             </span>
-                            <span className="text-[10px] font-semibold text-slate-500">
+                            <span className="text-sm font-medium text-gray-200">
                               {formatPhoneNumber(mc.patient_phone)}
                             </span>
                           </div>
