@@ -24,14 +24,6 @@ export function useWhatsApp(activePhone?: string) {
         setLoading(true)
         setError(null)
 
-        // Guard: redirect to login on an expired session instead of silently
-        // rendering an empty thread due to RLS.
-        const { data: { session } } = await supabase.auth.getSession()
-        if (!session) {
-          window.location.href = '/login'
-          return
-        }
-
         const { data, error: fetchErr } = await supabase
           .from('whatsapp_messages')
           .select('*')

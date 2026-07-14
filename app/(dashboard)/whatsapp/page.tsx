@@ -69,7 +69,7 @@ function WhatsAppContent() {
       try {
         setConvoLoading(true)
         setError(null)
-        
+
         // Load Templates
         const { data: templateData, error: templateErr } = await supabase
           .from('message_templates')

@@ -15,6 +15,8 @@ export function useAuth() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+
   useEffect(() => {
     async function getSession() {
       try {
@@ -26,16 +28,10 @@ export function useAuth() {
 
         if (session) {
           setUser(session.user)
-          const { data, error: profileErr } = await supabase
-            .from('profiles')
-            .select('*')
-            .eq('id', session.user.id)
-            .maybeSingle()
-          
-          if (profileErr) throw profileErr
-          setProfile(data)
+          setCurrentUserId(session.user.id)
         } else {
           setUser(null)
+          setCurrentUserId(null)
           setProfile(null)
         }
       } catch (err: unknown) {
@@ -48,31 +44,29 @@ export function useAuth() {
 
     getSession()
 
+    // CRITICAL: supabase-js serializes all auth work behind a Web Locks lock
+    // (navigator.locks, "lock:sb-<ref>-auth-token"). The onAuthStateChange
+    // callback runs WHILE that lock is held, so awaiting any other Supabase
+    // call inside it (e.g. a profiles query) re-enters the lock and deadlocks —
+    // every later getSession()/from() across the app then hangs forever.
+    //
+    // Fix: The callback must do NO Supabase call at all. We update user states
+    // synchronously and perform the profile query in a separate, decoupled useEffect.
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event: string, session: any) => {
-        try {
-          setError(null)
-          if (session) {
-            setUser(session.user)
-            const { data, error: profileErr } = await supabase
-              .from('profiles')
-              .select('*')
-              .eq('id', session.user.id)
-              .maybeSingle()
-            
-            if (profileErr) throw profileErr
-            setProfile(data)
-          } else {
-            setUser(null)
-            setProfile(null)
-            router.push('/login')
-          }
-        } catch (err: unknown) {
-          console.error('Auth state change handler error:', err)
-          setError(err instanceof Error ? err.message : 'Error syncing user profile')
-        } finally {
+      (_event: string, session: any) => {
+        setError(null)
+
+        if (!session) {
+          setUser(null)
+          setCurrentUserId(null)
+          setProfile(null)
           setLoading(false)
+          router.push('/login')
+          return
         }
+
+        setUser(session.user)
+        setCurrentUserId(session.user.id)
       }
     )
 
@@ -80,6 +74,38 @@ export function useAuth() {
       subscription.unsubscribe()
     }
   }, [router, supabase])
+
+  // Decoupled useEffect for profile fetching to completely avoid Web Locks conflicts
+  useEffect(() => {
+    if (!currentUserId) {
+      setProfile(null)
+      return
+    }
+
+    let active = true
+    async function fetchProfile() {
+      try {
+        const { data, error: profileErr } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', currentUserId)
+          .maybeSingle()
+
+        if (profileErr) throw profileErr
+        if (active) {
+          setProfile(data)
+        }
+      } catch (err: unknown) {
+        console.error('Error fetching user profile:', err)
+      }
+    }
+
+    fetchProfile()
+
+    return () => {
+      active = false
+    }
+  }, [currentUserId, supabase])
 
   const signOut = async () => {
     try {

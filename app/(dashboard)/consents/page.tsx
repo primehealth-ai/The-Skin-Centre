@@ -167,6 +167,7 @@ function AllConsentsTab() {
   const fetchConsents = useCallback(async () => {
     try {
       setError(null)
+
       const { data, error: fetchError } = await supabaseRef.current
         .from('patient_consents')
         .select(
