@@ -1,7 +1,8 @@
-import { createHmac, timingSafeEqual } from 'crypto'
 import { normalizePhone } from '@/lib/utils/phone'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logError } from '@/lib/utils/logError'
+
+export const maxDuration = 60
 
 type WhatsAppMessage = {
   from?: string
@@ -41,28 +42,10 @@ export async function POST(request: Request) {
   let body: WhatsAppWebhookBody | null = null
 
   try {
-    const appSecret = process.env.META_APP_SECRET
-    if (!appSecret) {
-      await logError('webhook', new Error('META_APP_SECRET is not configured'))
-      return new Response('Server misconfiguration', { status: 500 })
-    }
-
-    const rawBody = await request.text()
-    const headerSignature = request.headers.get('x-hub-signature-256')
-    if (!headerSignature) {
-      return new Response('Forbidden', { status: 403 })
-    }
-
-    const expectedSignature = `sha256=${createHmac('sha256', appSecret).update(rawBody).digest('hex')}`
-    const signatureMatches =
-      headerSignature.length === expectedSignature.length &&
-      timingSafeEqual(Buffer.from(headerSignature), Buffer.from(expectedSignature))
-
-    if (!signatureMatches) {
-      return new Response('Forbidden', { status: 403 })
-    }
-
-    body = JSON.parse(rawBody) as WhatsAppWebhookBody
+    // Gupshup BSP: no HMAC signature — accept all incoming POSTs.
+    // Header-based auth (Bearer token) will be added in the next step
+    // once the webhook endpoint is confirmed working in Gupshup dashboard.
+    body = (await request.json()) as WhatsAppWebhookBody
     const message = body.entry?.[0]?.changes?.[0]?.value?.messages?.[0]
 
     if (!message) {
