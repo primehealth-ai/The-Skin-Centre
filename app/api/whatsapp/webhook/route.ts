@@ -82,7 +82,7 @@ export async function POST(request: Request) {
 
     const { data: patient, error: patientError } = await supabase
       .from('patients')
-      .select('id')
+      .select('id, full_name')
       .eq('phone', patientPhone)
       .maybeSingle()
 
@@ -90,10 +90,30 @@ export async function POST(request: Request) {
       throw patientError
     }
 
+    // If this is an inbound from an unknown number, create a stub patient row
+    // so the message has a valid patient_id and is queryable from the dashboard.
+    let resolvedPatientId: string | null = patient?.id ?? null
+    if (!patient) {
+      await supabase
+        .from('patients')
+        .upsert(
+          { phone: patientPhone, full_name: 'New Patient' },
+          { onConflict: 'phone', ignoreDuplicates: true },
+        )
+
+      const { data: fetchedPatient } = await supabase
+        .from('patients')
+        .select('id')
+        .eq('phone', patientPhone)
+        .maybeSingle()
+
+      resolvedPatientId = fetchedPatient?.id ?? null
+    }
+
     const { error: messageError } = await supabase
       .from('whatsapp_messages')
       .insert({
-        patient_id: patient?.id ?? null,
+        patient_id: resolvedPatientId,
         patient_phone: patientPhone,
         direction: 'inbound',
         message_text: messageText,
@@ -134,11 +154,11 @@ export async function POST(request: Request) {
       }
     }
 
-    if (patient?.id) {
+    if (resolvedPatientId) {
       const { data: missedCall, error: missedCallError } = await supabase
         .from('missed_calls')
         .select('id')
-        .eq('patient_id', patient.id)
+        .eq('patient_id', resolvedPatientId)
         .in('status', ['pending', 'whatsapp_sent'])
         .order('created_at', { ascending: false })
         .limit(1)
@@ -158,6 +178,8 @@ export async function POST(request: Request) {
               now.getTime() + 24 * 60 * 60 * 1000
             ).toISOString(),
             patient_replied_at: now.toISOString(),
+            // patient_reply_text stores the first reply message for staff context
+            patient_reply_text: messageText || null,
           })
           .eq('id', missedCall.id)
 

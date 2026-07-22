@@ -1,6 +1,6 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { logError } from '@/lib/utils/logError'
-import { sendMissedCallWhatsApp } from '@/lib/whatsapp/send'
+import { sendMissedCallWhatsApp, sendFirstContactWhatsApp } from '@/lib/whatsapp/send'
 
 type CallStatus = 'answered' | 'missed'
 
@@ -140,6 +140,10 @@ export async function processKnowlarityWebhook(payload: any): Promise<void> {
       throw patientUpsertError
     }
 
+    // upsertedPatient is NON-NULL only when the INSERT actually happened
+    // (ignoreDuplicates:true means existing rows return null).
+    const isNewPatient = upsertedPatient !== null
+
     const patient =
       upsertedPatient ??
       (
@@ -152,6 +156,27 @@ export async function processKnowlarityWebhook(payload: any): Promise<void> {
 
     if (!patient) {
       throw new Error(`Failed to resolve patient record for phone ${normalizedPhone}`)
+    }
+
+    // FIRST-CONTACT WHATSAPP — fire for brand-new patients only.
+    // Trigger: new phone number seen for the first time, regardless of
+    // whether the call was answered or missed.
+    // Wrapped in try/catch — WhatsApp failure must NEVER fail the call record.
+    if (isNewPatient) {
+      const firstContactServiceType = clinicNumber?.service_name ?? 'General'
+      try {
+        const waResult = await sendFirstContactWhatsApp(
+          normalizedPhone,
+          firstContactServiceType,
+          null, // no related_missed_call_id yet — call row not written yet at this point
+        )
+        console.info(
+          `[knowlarity] first-contact WA for ${normalizedPhone}: sent=${waResult.sent}`,
+          'reason' in waResult ? waResult.reason : `msgId=${waResult.messageId}`,
+        )
+      } catch (waErr) {
+        console.error('[knowlarity] sendFirstContactWhatsApp threw unexpectedly:', waErr)
+      }
     }
 
     // Resolve call status from agent_number + call_transfer_status.
