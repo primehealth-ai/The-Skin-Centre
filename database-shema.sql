@@ -34,6 +34,8 @@ CREATE TABLE public.patients (
   is_active boolean DEFAULT true,
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
+  first_recovery_sent_at timestamp with time zone,
+  first_whatsapp_sent_at timestamp with time zone,
   CONSTRAINT patients_pkey PRIMARY KEY (id)
 );
 CREATE TABLE public.calls (
@@ -129,6 +131,8 @@ CREATE TABLE public.message_templates (
   meta_template_name text,
   meta_template_language text DEFAULT 'en'::text,
   service_type text DEFAULT 'all'::text CHECK (service_type = ANY (ARRAY['Skin Care'::text, 'Hair Care'::text, 'General'::text, 'all'::text])),
+  gupshup_template_id text,
+  language text DEFAULT 'hi'::text,
   CONSTRAINT message_templates_pkey PRIMARY KEY (id)
 );
 CREATE TABLE public.patient_consents (
@@ -202,4 +206,9 @@ CREATE TABLE public.opted_out_numbers (
   last_action text DEFAULT 'opted_out'::text,
   reason text,
   CONSTRAINT opted_out_numbers_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.whatsapp_send_counters (
+  send_date date NOT NULL,
+  count integer NOT NULL DEFAULT 0,
+  CONSTRAINT whatsapp_send_counters_pkey PRIMARY KEY (send_date)
 );
