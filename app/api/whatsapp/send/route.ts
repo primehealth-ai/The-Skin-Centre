@@ -94,7 +94,6 @@ export async function POST(req: NextRequest) {
       .select('id, name, message_text, gupshup_template_id')
       .eq('id', templateId)
       .eq('is_active', true)
-      .not('gupshup_template_id', 'is', null)
       .maybeSingle()
 
     if (templateErr) {
@@ -102,8 +101,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Failed to load template.' }, { status: 500 })
     }
 
-    if (!templateRow?.gupshup_template_id) {
-      return NextResponse.json({ error: 'Template not found or cannot be sent via WhatsApp.' }, { status: 404 })
+    console.log('[template-lookup]', { templateId, gupshup_template_id: templateRow?.gupshup_template_id })
+
+    if (!templateRow) {
+      return NextResponse.json({ error: 'Template not found or is inactive.' }, { status: 404 })
+    }
+
+    if (!templateRow.gupshup_template_id) {
+      return NextResponse.json(
+        { error: 'Template not configured: gupshup_template_id is null for this template' },
+        { status: 400 }
+      )
     }
 
     const facebookTemplateId = templateRow.gupshup_template_id as string
