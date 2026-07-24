@@ -138,7 +138,10 @@ export async function POST(req: NextRequest) {
     const templateStatus = String(templateInner.status ?? '')
     const templateMsgId = String(templateInner.id ?? '')
 
-    if (templateStatus !== 'submitted') {
+    // Log raw Gupshup response on every attempt so it appears in Vercel logs
+    console.info('[manual-send] Gupshup template API response:', JSON.stringify(templateApiResponse))
+
+    if (templateStatus !== 'submitted' && templateStatus !== 'success') {
       const errorMsg = `Gupshup template send failed (status=${templateStatus}, code=${templateInner.code ?? 'n/a'})`
       await logError('whatsapp', new Error(errorMsg), {
         route: 'manual-send', dbPhone, templateId, facebookTemplateId, apiResponse: templateApiResponse,
@@ -242,7 +245,7 @@ export async function POST(req: NextRequest) {
       const locationStatus = String(locationInner.status ?? '')
       const locationMsgId = String(locationInner.id ?? '')
 
-      if (locationStatus === 'submitted') {
+      if (locationStatus === 'submitted' || locationStatus === 'success') {
         // Log the location as a second outbound message
         await supabase.from('whatsapp_messages').insert({
           patient_id: patient?.id || null,
