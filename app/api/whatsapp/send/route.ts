@@ -56,6 +56,10 @@ export async function POST(req: NextRequest) {
 
     const dbPhone = normalizedPhone
 
+    if (!/^91\d{10}$/.test(dbPhone)) {
+      return NextResponse.json({ error: 'Invalid phone format: ' + dbPhone }, { status: 400 })
+    }
+
     // Opt-out check — fail closed
     const { data: optedOut, error: optedOutError } = await supabase
       .from('opted_out_numbers')
@@ -121,11 +125,21 @@ export async function POST(req: NextRequest) {
       whatsAppTemplateId: facebookTemplateId,
     })
 
-    const templateRes = await fetch('https://mediaapi.smsgupshup.com/GatewayAPI/rest', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: templateBody.toString(),
-    })
+    console.log('[gupshup-request]', templateBody.toString())
+
+    const templateAbort = new AbortController()
+    const templateTimeout = setTimeout(() => templateAbort.abort(), 10000)
+    let templateRes: Response
+    try {
+      templateRes = await fetch('https://mediaapi.smsgupshup.com/GatewayAPI/rest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: templateBody.toString(),
+        signal: templateAbort.signal,
+      })
+    } finally {
+      clearTimeout(templateTimeout)
+    }
 
     let templateApiResponse: Record<string, unknown> = {}
     try {
@@ -139,6 +153,7 @@ export async function POST(req: NextRequest) {
     const templateMsgId = String(templateInner.id ?? '')
 
     // Log raw Gupshup response on every attempt so it appears in Vercel logs
+    console.log('[gupshup-http-status]', templateRes.status)
     console.info('[manual-send] Gupshup template API response:', JSON.stringify(templateApiResponse))
 
     if (templateStatus !== 'submitted' && templateStatus !== 'success') {
