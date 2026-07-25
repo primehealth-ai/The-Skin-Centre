@@ -119,7 +119,7 @@ export async function POST(req: NextRequest) {
 
     // ── STEP 1: Send the WhatsApp template ───────────────────────────────────
     // send_to is 917XXXXXXXXX format (no +), which is what normalizePhone returns
-    const templateBody = new URLSearchParams({
+    const payload = new URLSearchParams({
       method: 'SendMessage',
       v: '1.1',
       auth_scheme: 'plain',
@@ -133,16 +133,17 @@ export async function POST(req: NextRequest) {
       whatsAppTemplateId: facebookTemplateId,
     })
 
-    console.log('[gupshup-request]', templateBody.toString())
+    console.log('[gupshup-request]', payload.toString())
 
     const templateAbort = new AbortController()
     const templateTimeout = setTimeout(() => templateAbort.abort(), 10000)
     let templateRes: Response
     try {
+      console.log('[final-payload]', payload.toString())
       templateRes = await fetch('https://mediaapi.smsgupshup.com/GatewayAPI/rest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: templateBody.toString(),
+        body: payload.toString(),
         signal: templateAbort.signal,
       })
     } finally {
