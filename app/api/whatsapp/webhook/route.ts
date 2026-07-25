@@ -43,8 +43,6 @@ export async function POST(request: Request) {
 
   try {
     // Gupshup BSP: no HMAC signature — accept all incoming POSTs.
-    // Header-based auth (Bearer token) will be added in the next step
-    // once the webhook endpoint is confirmed working in Gupshup dashboard.
     body = (await request.json()) as WhatsAppWebhookBody
     const message = body.entry?.[0]?.changes?.[0]?.value?.messages?.[0]
 
@@ -52,11 +50,9 @@ export async function POST(request: Request) {
       return new Response('OK', { status: 200 })
     }
 
-    // Canonical normalizer (lib/utils/phone) returns null for unrecognised input.
-    // Guard here so the opt-out key we store/lookup is always canonical and we never
-    // attempt a NOT NULL patient_phone insert with a null value.
-    const patientPhone = normalizePhone(message.from ?? '')
-    if (!patientPhone) {
+    // 1. Normalize inbound phone using normalizePhone() from lib/utils/phone.ts
+    const normalizedPhone = normalizePhone(message.from ?? '')
+    if (!normalizedPhone) {
       await logError('webhook', new Error(`Unrecognised WhatsApp sender phone: ${message.from ?? '(empty)'}`))
       return new Response('OK', { status: 200 })
     }
@@ -69,7 +65,7 @@ export async function POST(request: Request) {
     const { data: optedOut, error: optedOutError } = await supabase
       .from('opted_out_numbers')
       .select('id')
-      .eq('phone', patientPhone)
+      .eq('phone', normalizedPhone)
       .maybeSingle()
 
     if (optedOutError) {
@@ -80,41 +76,43 @@ export async function POST(request: Request) {
       return new Response('OK', { status: 200 })
     }
 
+    // 2. Query: SELECT id, full_name FROM patients WHERE phone = normalizedPhone
     const { data: patient, error: patientError } = await supabase
       .from('patients')
       .select('id, full_name')
-      .eq('phone', patientPhone)
+      .eq('phone', normalizedPhone)
       .maybeSingle()
 
     if (patientError) {
       throw patientError
     }
 
-    // If this is an inbound from an unknown number, create a stub patient row
-    // so the message has a valid patient_id and is queryable from the dashboard.
+    // 3. If found: use existing patient_id — do NOT create new row
+    // 4. If not found: insert new patient with full_name='New Patient' using upsert
     let resolvedPatientId: string | null = patient?.id ?? null
     if (!patient) {
       await supabase
         .from('patients')
         .upsert(
-          { phone: patientPhone, full_name: 'New Patient' },
-          { onConflict: 'phone', ignoreDuplicates: true },
+          { phone: normalizedPhone, full_name: 'New Patient' },
+          { onConflict: 'phone', ignoreDuplicates: true }
         )
 
       const { data: fetchedPatient } = await supabase
         .from('patients')
         .select('id')
-        .eq('phone', patientPhone)
+        .eq('phone', normalizedPhone)
         .maybeSingle()
 
       resolvedPatientId = fetchedPatient?.id ?? null
     }
 
+    // Also: when inserting into whatsapp_messages, use resolved patient_id
     const { error: messageError } = await supabase
       .from('whatsapp_messages')
       .insert({
         patient_id: resolvedPatientId,
-        patient_phone: patientPhone,
+        patient_phone: normalizedPhone,
         direction: 'inbound',
         message_text: messageText,
         whatsapp_message_id: message.id ?? null,
@@ -130,7 +128,7 @@ export async function POST(request: Request) {
         .from('opted_out_numbers')
         .upsert(
           {
-            phone: patientPhone,
+            phone: normalizedPhone,
             opted_out_at: new Date().toISOString(),
             opted_in_at: null,
             last_action: 'opted_out',
@@ -147,13 +145,14 @@ export async function POST(request: Request) {
       const { error: optInError } = await supabase
         .from('opted_out_numbers')
         .delete()
-        .eq('phone', patientPhone)
+        .eq('phone', normalizedPhone)
 
       if (optInError) {
         throw optInError
       }
     }
 
+    // If patient exists in DB: check missed_calls where patient_id matches and status='pending' (or 'whatsapp_sent')
     if (resolvedPatientId) {
       const { data: missedCall, error: missedCallError } = await supabase
         .from('missed_calls')
@@ -178,7 +177,6 @@ export async function POST(request: Request) {
               now.getTime() + 24 * 60 * 60 * 1000
             ).toISOString(),
             patient_replied_at: now.toISOString(),
-            // patient_reply_text stores the first reply message for staff context
             patient_reply_text: messageText || null,
           })
           .eq('id', missedCall.id)
@@ -189,7 +187,11 @@ export async function POST(request: Request) {
       }
     }
   } catch (error: unknown) {
-    await logError('webhook', error, body ?? undefined)
+    try {
+      await logError('webhook', error, body ?? undefined)
+    } catch {
+      // Suppress logging error to guarantee 200 status return
+    }
   }
 
   return new Response('OK', { status: 200 })
