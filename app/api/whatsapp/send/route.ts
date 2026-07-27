@@ -5,13 +5,25 @@ import { isValidIndianPhone, normalizePhone } from '@/lib/utils/phone'
 
 export const dynamic = 'force-dynamic'
 
-// ── Clinic location (sent as a pin after every manual template) ──────────────
-const CLINIC_LOCATION = {
-  latitude: '25.6000901',
+// ── Clinic location — embedded in every template send as msg_type=LOCATION ───
+const CLINIC_LOCATION_JSON = JSON.stringify({
   longitude: '85.1512566',
+  latitude: '25.6000901',
   name: 'The Skin Centre',
-  address: 'Patna, Bihar',
-} as const
+  address: "B-54, People's Cooperative Colony, Near Ganga Devi Mahila College, Patna - 800020",
+})
+
+/**
+ * Build the wa_template_json component list.
+ * Skin Care template has only a URL button (index 0).
+ * Hair Care + General templates have URL (0) + call (1).
+ */
+function getWaTemplateJson(serviceType: string): string {
+  const urlButton = { type: 'button', sub_type: 'url', index: 0, parameters: [{ type: 'text', text: '' }] }
+  const callButton = { type: 'button', sub_type: 'call', index: 1, parameters: [{ type: 'text', text: '' }] }
+  if (serviceType === 'Skin Care') return JSON.stringify({ components: [urlButton] })
+  return JSON.stringify({ components: [urlButton, callButton] })
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -22,7 +34,7 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json()
-    const { to, message, templateId, relatedMissedCallId } = body
+    const { to, message, templateId, relatedMissedCallId, serviceType: bodyServiceType } = body
 
     // WHATSAPP_SENDING_ENABLED master gate — same as automated path
     if (process.env.WHATSAPP_SENDING_ENABLED !== 'true') {
@@ -86,12 +98,11 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // Look up template by DB id — gupshup_template_id holds the Facebook/Meta template ID
-    // Values: 1556340389353326 (skin_care), 2534426323646745 (hair_care), 918252100559312 (general)
+    // Look up template — also fetches service_type as fallback when not in body
     const supabaseAny = supabase as any
     const { data: templateRow, error: templateErr } = await supabaseAny
       .from('message_templates')
-      .select('id, name, message_text, gupshup_template_id')
+      .select('id, name, message_text, gupshup_template_id, service_type')
       .eq('id', templateId)
       .eq('is_active', true)
       .maybeSingle()
@@ -114,36 +125,42 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    // serviceType: prefer from request body (sent by frontend), fall back to DB column
+    const serviceType: string = (bodyServiceType as string) || (templateRow.service_type as string) || 'General'
+
     const facebookTemplateId = templateRow.gupshup_template_id as string
     const messageText = (templateRow.message_text as string) || (templateRow.name as string)
 
-    // ── STEP 1: Send the WhatsApp template ───────────────────────────────────
-    // send_to is 917XXXXXXXXX format (no +), which is what normalizePhone returns
-    const payload = new URLSearchParams({
-      method: 'SendMessage',
-      v: '1.1',
-      auth_scheme: 'plain',
-      format: 'json',
-      msg_type: 'text',
-      isHSM: 'true',
-      isTemplate: 'true',
+    // ── Send the WhatsApp template via Gupshup ────────────────────────────────
+    // msg_type=LOCATION embeds the clinic pin inside the template message.
+    // wa_template_json determines which button components are included.
+    const sendBody = new URLSearchParams({
       userid: process.env.GUPSHUP_USER_ID!,
       password: process.env.GUPSHUP_PASSWORD!,
       send_to: dbPhone,
+      v: '1.1',
+      format: 'json',
+      msg_type: 'LOCATION',
+      location: CLINIC_LOCATION_JSON,
+      method: 'SENDMESSAGE',
       whatsAppTemplateId: facebookTemplateId,
+      auth_scheme: 'plain',
+      isHSM: 'true',
+      isTemplate: 'true',
+      wa_template_json: getWaTemplateJson(serviceType),
     })
 
-    console.log('[gupshup-request]', payload.toString())
+    console.log('[gupshup-request]', sendBody.toString())
 
     const templateAbort = new AbortController()
     const templateTimeout = setTimeout(() => templateAbort.abort(), 10000)
     let templateRes: Response
     try {
-      console.log('[final-payload]', payload.toString())
+      console.log('[final-payload]', sendBody.toString())
       templateRes = await fetch('https://mediaapi.smsgupshup.com/GatewayAPI/rest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: payload.toString(),
+        body: sendBody.toString(),
         signal: templateAbort.signal,
       })
     } finally {
@@ -167,9 +184,25 @@ export async function POST(req: NextRequest) {
 
     if (templateStatus !== 'submitted' && templateStatus !== 'success') {
       const errorMsg = `Gupshup template send failed (status=${templateStatus}, code=${templateInner.code ?? 'n/a'})`
-      await logError('whatsapp', new Error(errorMsg), {
-        route: 'manual-send', dbPhone, templateId, facebookTemplateId, apiResponse: templateApiResponse,
-      })
+
+      // Log full Gupshup error response to error_logs for debugging
+      try {
+        await (supabase as any).from('error_logs').insert({
+          source: 'gupshup_error',
+          error_message: errorMsg,
+          stack: null,
+          payload: {
+            phone: dbPhone,
+            templateId,
+            facebookTemplateId,
+            serviceType,
+            gupshupResponse: templateApiResponse,
+          },
+        })
+      } catch (logErr) {
+        console.error('[manual-send] Failed to log gupshup error:', logErr)
+      }
+
       return NextResponse.json({ error: errorMsg }, { status: 502 })
     }
 
@@ -230,74 +263,14 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ── STEP 2: Send clinic location pin (best-effort, never fails the request) ──
-    // Location is sent as a follow-up after the template.
-    // This succeeds when a 24-hr session is active; if not, Gupshup rejects it — that
-    // is acceptable. The template message was already delivered regardless.
-    try {
-      const locationBody = new URLSearchParams({
-        method: 'SendMessage',
-        v: '1.1',
-        auth_scheme: 'plain',
-        format: 'json',
-        msg_type: 'LOCATION',
-        userid: process.env.GUPSHUP_USER_ID!,
-        password: process.env.GUPSHUP_PASSWORD!,
-        send_to: dbPhone,
-        location: JSON.stringify({
-          latitude: CLINIC_LOCATION.latitude,
-          longitude: CLINIC_LOCATION.longitude,
-          name: CLINIC_LOCATION.name,
-          address: CLINIC_LOCATION.address,
-        }),
-      })
-
-      const locationRes = await fetch('https://mediaapi.smsgupshup.com/GatewayAPI/rest', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: locationBody.toString(),
-      })
-
-      let locationApiResponse: Record<string, unknown> = {}
-      try {
-        locationApiResponse = (await locationRes.json()) as Record<string, unknown>
-      } catch {
-        locationApiResponse = {}
-      }
-
-      const locationInner = (locationApiResponse.response ?? locationApiResponse) as Record<string, unknown>
-      const locationStatus = String(locationInner.status ?? '')
-      const locationMsgId = String(locationInner.id ?? '')
-
-      if (locationStatus === 'submitted' || locationStatus === 'success') {
-        // Log the location as a second outbound message
-        await supabase.from('whatsapp_messages').insert({
-          patient_id: patient?.id || null,
-          patient_phone: dbPhone,
-          patient_name: patient?.full_name || null,
-          whatsapp_message_id: locationMsgId || null,
-          message_text: `📍 ${CLINIC_LOCATION.name} — ${CLINIC_LOCATION.address}`,
-          direction: 'outbound',
-          sent_by_staff_id: user.id,
-          sent_by_automation: false,
-          delivery_status: 'sent',
-          sent_at: new Date().toISOString(),
-          related_missed_call_id: relatedMissedCallId || null,
-        })
-      } else {
-        // Location send failed (no open session is the most common reason) — log silently
-        console.info(
-          `[manual-send] Location pin skipped for ${dbPhone}: status=${locationStatus}, code=${locationInner.code ?? 'n/a'}`
-        )
-      }
-    } catch (locationErr) {
-      // Never let location failure surface to caller
-      console.error('[manual-send] Location send threw unexpectedly:', locationErr)
-    }
-
     return NextResponse.json({ success: true, data: loggedMsg }, { status: 200 })
   } catch (err: unknown) {
-    await logError('whatsapp', err, { route: 'manual-send' })
+    // Network / unhandled exception — log but never throw to caller
+    try {
+      await logError('whatsapp', err, { route: 'manual-send' })
+    } catch {
+      console.error('[manual-send] logError itself failed:', err)
+    }
     return NextResponse.json(
       { error: err instanceof Error ? err.message : 'Internal Server Error' },
       { status: 500 }

@@ -44,14 +44,30 @@ async function processWebhooks() {
         // Bug 4 fix: String(err) serialises Error objects as "[object Object]".
         // Extract .message for real Error instances; JSON.stringify for anything else.
         const errMessage = err instanceof Error ? err.message : JSON.stringify(err)
+        const isPermanentlyFailed = attemptsUsed >= 5
+
         await supabase
           .from('webhook_queue')
           .update({
-            status: attemptsUsed >= 3 ? 'failed' : 'pending',
+            status: isPermanentlyFailed ? 'failed' : 'pending',
             attempts: attemptsUsed + 1,
             error: errMessage,
           })
           .eq('id', job.id)
+
+        // On permanent failure: log to error_logs so ops can investigate
+        if (isPermanentlyFailed) {
+          try {
+            await supabase.from('error_logs').insert({
+              source: 'webhook_queue_failed',
+              error_message: `Webhook job ${job.id} permanently failed after ${attemptsUsed} attempts: ${errMessage}`,
+              stack: null,
+              payload: { jobId: job.id, attempts: attemptsUsed, payload: job.payload },
+            })
+          } catch (logErr) {
+            console.error('[process-webhooks] Failed to write to error_logs:', logErr)
+          }
+        }
 
         await logError('cron', err, job.payload)
       }

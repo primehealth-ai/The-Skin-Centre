@@ -28,6 +28,25 @@ function toProviderPhone(phone: string): string {
   return phone
 }
 
+// ── Clinic location — embedded in every Gupshup template send ─────────────────
+const CLINIC_LOCATION_JSON = JSON.stringify({
+  longitude: '85.1512566',
+  latitude: '25.6000901',
+  name: 'The Skin Centre',
+  address: "B-54, People's Cooperative Colony, Near Ganga Devi Mahila College, Patna - 800020",
+})
+
+/**
+ * Build the wa_template_json component list.
+ * Skin Care: URL button only. Hair Care / General: URL + call buttons.
+ */
+function getWaTemplateJson(serviceType: string): string {
+  const urlButton = { type: 'button', sub_type: 'url', index: 0, parameters: [{ type: 'text', text: '' }] }
+  const callButton = { type: 'button', sub_type: 'call', index: 1, parameters: [{ type: 'text', text: '' }] }
+  if (serviceType === 'Skin Care') return JSON.stringify({ components: [urlButton] })
+  return JSON.stringify({ components: [urlButton, callButton] })
+}
+
 function getTemplateName(serviceType: string): string {
   if (serviceType === 'Skin Care') {
     return 'missed_call_skin_care'
@@ -363,18 +382,22 @@ export async function sendFirstContactWhatsApp(
     }
 
     // ── F. GUPSHUP SEND REQUEST ──────────────────────────────────────────────
+    // msg_type=LOCATION embeds the clinic pin inside the template message.
+    // wa_template_json determines which button components are included per service.
     const body = new URLSearchParams({
-      method: 'SendMessage',
-      v: '1.1',
-      auth_scheme: 'plain',
-      format: 'json',
-      msg_type: 'text',
-      isHSM: 'true',
-      isTemplate: 'true',
       userid: process.env.GUPSHUP_USER_ID!,
       password: process.env.GUPSHUP_PASSWORD!,
       send_to: patientPhone,
+      v: '1.1',
+      format: 'json',
+      msg_type: 'LOCATION',
+      location: CLINIC_LOCATION_JSON,
+      method: 'SENDMESSAGE',
       whatsAppTemplateId: template.gupshup_template_id,
+      auth_scheme: 'plain',
+      isHSM: 'true',
+      isTemplate: 'true',
+      wa_template_json: getWaTemplateJson(serviceType),
     })
 
     const gupshupRes = await fetch('https://mediaapi.smsgupshup.com/GatewayAPI/rest', {
@@ -415,25 +438,27 @@ export async function sendFirstContactWhatsApp(
         related_missed_call_id: relatedMissedCallId ?? null,
       })
 
-      // UPSERT counter: INSERT 1 on first send of the day, else increment.
-      // No increment_whatsapp_counter RPC exists — use upsert then update pattern.
-      // Supabase JS client doesn't support arithmetic in updates, so we read
-      // currentCount (captured above) and write currentCount+1. This is safe
-      // because the lifetime cap above already serialises concurrent sends.
+      // UPSERT counter: race-safe atomic increment.
+      // Attempt Postgres-side RPC first (atomic, no read-then-write race).
+      // Falls back to a safe upsert pattern if the RPC doesn't exist yet.
       try {
-        const todayDate = new Date().toISOString().slice(0, 10)
-        await supabase
-          .from('whatsapp_send_counters')
-          .upsert(
-            { send_date: todayDate, count: 1, warning_sent: false },
-            { onConflict: 'send_date', ignoreDuplicates: true },
-          )
-        // If a row already existed (ignoreDuplicates skipped the insert), increment it
-        if (currentCount > 0) {
+        const { error: rpcErr } = await supabase.rpc('increment_whatsapp_counter_today')
+        if (rpcErr) {
+          // RPC doesn't exist yet — fall back to upsert + update pattern
+          const todayDate = new Date().toISOString().slice(0, 10)
           await supabase
             .from('whatsapp_send_counters')
-            .update({ count: currentCount + 1 })
-            .eq('send_date', todayDate)
+            .upsert(
+              { send_date: todayDate, count: 1, warning_sent: false },
+              { onConflict: 'send_date', ignoreDuplicates: true },
+            )
+          // If row already existed (ignoreDuplicates skipped insert), increment it
+          if (currentCount > 0) {
+            await supabase
+              .from('whatsapp_send_counters')
+              .update({ count: currentCount + 1 })
+              .eq('send_date', todayDate)
+          }
         }
       } catch (counterErr) {
         // Counter failure is non-fatal — log and continue
@@ -442,6 +467,24 @@ export async function sendFirstContactWhatsApp(
 
       console.info(`[sendFirstContactWhatsApp] sent: ${patientPhone} msgId=${messageId}`)
       return { sent: true, messageId }
+    }
+
+    // ── Log Gupshup error response to error_logs for all failure cases ────────
+    // (done before the specific error-code branches so it fires for all non-success statuses)
+    try {
+      await supabase.from('error_logs').insert({
+        source: 'gupshup_error',
+        error_message: `Gupshup send failed — status: ${status}, code: ${errorCode}`,
+        stack: null,
+        payload: {
+          phone: patientPhone,
+          templateId: template.id,
+          serviceType,
+          gupshupResponse: apiResponse,
+        },
+      })
+    } catch (logErr) {
+      console.error('[sendFirstContactWhatsApp] Failed to log gupshup error to error_logs:', logErr)
     }
 
     // ERROR 1002 — number not on WhatsApp
@@ -481,7 +524,12 @@ export async function sendFirstContactWhatsApp(
   } catch (err: unknown) {
     // NETWORK / UNHANDLED EXCEPTION — best-effort rollback, never throw
     await rollbackFirstWhatsAppSentAt(patientPhone)
-    await logError('whatsapp_send', err, { patientPhone, serviceType, step: 'exception' })
+    // Log to error_logs — never rethrow
+    try {
+      await logError('whatsapp_send', err, { patientPhone, serviceType, step: 'exception' })
+    } catch {
+      console.error('[sendFirstContactWhatsApp] network exception (logError also failed):', err)
+    }
     return { sent: false, reason: 'exception' }
   }
 }

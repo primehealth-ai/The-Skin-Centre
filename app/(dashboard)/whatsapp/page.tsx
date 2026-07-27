@@ -230,18 +230,18 @@ function WhatsAppContent() {
     await sendMessage(text, undefined, missedCall?.id)
   }
 
-  const handleSendTemplate = async (templateId: string) => {
+  const handleSendTemplate = async (templateId: string, serviceType: string) => {
     if (!activePhone) return
 
     // Strip '+' if present so server assertion (^91\d{10}$) always passes
     const sendTo = activePhone.replace(/^\+/, '')
 
-    console.log('[send-template-click]', { to: sendTo, templateId })
+    console.log('[send-template-click]', { to: sendTo, templateId, serviceType })
 
     const response = await fetch('/api/whatsapp/send', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ to: sendTo, templateId }),
+      body: JSON.stringify({ to: sendTo, templateId, serviceType }),
     })
 
     if (!response.ok) {

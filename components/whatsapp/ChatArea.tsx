@@ -18,7 +18,7 @@ interface ChatAreaProps {
   templates: Template[]
   whatsappSessionExpiresAt: string | null
   onSendMessage: (text: string) => Promise<void>
-  onSendTemplate: (templateId: string) => Promise<void>
+  onSendTemplate: (templateId: string, serviceType: string) => Promise<void>
   hasPendingMissedCall?: boolean
   onMarkRecovered?: () => Promise<void>
   loading?: boolean
@@ -106,7 +106,10 @@ export function ChatArea({
     try {
       setIsSendingTemplate(true)
       setError(null)
-      await onSendTemplate(selectedTemplateId)
+      // Find the selected template to extract its service_type
+      const selectedTemplate = templates.find((t) => t.id === selectedTemplateId)
+      const serviceType: string = (selectedTemplate as any)?.service_type ?? 'General'
+      await onSendTemplate(selectedTemplateId, serviceType)
       setSelectedTemplateId('')
       showSuccess('Template sent successfully')
     } catch (err: unknown) {
