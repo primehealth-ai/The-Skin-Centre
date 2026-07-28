@@ -58,9 +58,10 @@ function WhatsAppContent() {
     setWhatsappSessionExpiresAt(data?.whatsapp_session_expires_at ?? null)
   }, [activePhone, supabase])
 
+  // Fetch session on conversation open (activePhone change) and when messages update
   useEffect(() => {
     loadSessionStatus()
-  }, [loadSessionStatus, messages])
+  }, [loadSessionStatus, activePhone])
 
   // Build conversation list from messages + enrich with pending calls + patient IDs
   const loadConversations = useCallback(async () => {
@@ -161,6 +162,13 @@ function WhatsAppContent() {
         { event: 'INSERT', schema: 'public', table: 'whatsapp_messages' },
         (payload: { new: Message }) => {
           const newMsg = payload.new
+
+          // Fix 2: Re-fetch session for the active phone when a new inbound message
+          // arrives. 500ms delay lets the webhook's patients UPDATE commit first.
+          if (newMsg.direction === 'inbound' && newMsg.patient_phone === activePhone) {
+            setTimeout(() => loadSessionStatus(), 500)
+          }
+
           setConversations((prev) => {
             const index = prev.findIndex((c) => c.patient_phone === newMsg.patient_phone)
             const updated = [...prev]
@@ -193,7 +201,7 @@ function WhatsAppContent() {
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [supabase, loadConversations])
+  }, [supabase, loadConversations, activePhone, loadSessionStatus])
 
   const handleSelectConversation = async (phone: string) => {
     // Mark inbound messages as read

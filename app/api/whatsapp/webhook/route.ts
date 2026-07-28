@@ -107,7 +107,15 @@ export async function POST(request: Request) {
       resolvedPatientId = fetchedPatient?.id ?? null
     }
 
-    // Also: when inserting into whatsapp_messages, use resolved patient_id
+    // FIX 1 — Update 24hr session window BEFORE inserting message
+    // (ensures patients row is updated before Realtime fires on whatsapp_messages INSERT)
+    const sessionExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+    await supabase
+      .from('patients')
+      .update({ whatsapp_session_expires_at: sessionExpiry })
+      .eq('phone', normalizedPhone)
+
+    // Insert inbound message into whatsapp_messages
     const { error: messageError } = await supabase
       .from('whatsapp_messages')
       .insert({
@@ -121,16 +129,6 @@ export async function POST(request: Request) {
 
     if (messageError) {
       throw messageError
-    }
-
-    // FIX 1 — Update 24hr session window on every inbound message
-    if (resolvedPatientId) {
-      await supabase
-        .from('patients')
-        .update({
-          whatsapp_session_expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-        })
-        .eq('phone', normalizedPhone)
     }
 
     if (isOptOutKeyword) {
