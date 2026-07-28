@@ -1,7 +1,7 @@
 'use client'
 import { useState, useRef, useEffect } from 'react'
 import Link from 'next/link'
-import { Sparkles, MessageSquare, AlertCircle, ChevronLeft, CheckCircle2, UserRound, PhoneMissed } from 'lucide-react'
+import { Sparkles, MessageSquare, AlertCircle, ChevronLeft, CheckCircle2, UserRound, PhoneMissed, RefreshCw } from 'lucide-react'
 import { MessageBubble } from './MessageBubble'
 import { Button } from '../ui/Button'
 import { formatPhoneNumber } from '@/lib/utils/formatters'
@@ -23,6 +23,7 @@ interface ChatAreaProps {
   onMarkRecovered?: () => Promise<void>
   loading?: boolean
   onBack?: () => void
+  onRefresh?: () => Promise<void>
 }
 
 export function ChatArea({
@@ -38,11 +39,13 @@ export function ChatArea({
   onMarkRecovered,
   loading = false,
   onBack,
+  onRefresh,
 }: ChatAreaProps) {
   const [inputText, setInputText] = useState('')
   const [isSending, setIsSending] = useState(false)
   const [isSendingTemplate, setIsSendingTemplate] = useState(false)
   const [isMarkingRecovered, setIsMarkingRecovered] = useState(false)
+  const [isRefreshing, setIsRefreshing] = useState(false)
   const [selectedTemplateId, setSelectedTemplateId] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [successMsg, setSuccessMsg] = useState<string | null>(null)
@@ -186,16 +189,33 @@ export function ChatArea({
           </div>
         </div>
 
-        {/* View Patient link */}
-        {patientId && (
-          <Link
-            href={`/patients/${patientId}`}
-            className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500/30"
-          >
-            <UserRound className="h-3.5 w-3.5" />
-            View Patient
-          </Link>
-        )}
+        {/* Right side: Refresh + View Patient */}
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {onRefresh && (
+            <button
+              id="chat-refresh-btn"
+              aria-label="Refresh chat"
+              onClick={async () => {
+                if (isRefreshing) return
+                setIsRefreshing(true)
+                try { await onRefresh() } finally { setIsRefreshing(false) }
+              }}
+              disabled={isRefreshing}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors focus:outline-none disabled:opacity-50"
+            >
+              <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+            </button>
+          )}
+          {patientId && (
+            <Link
+              href={`/patients/${patientId}`}
+              className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500/30"
+            >
+              <UserRound className="h-3.5 w-3.5" />
+              View Patient
+            </Link>
+          )}
+        </div>
       </div>
 
       {/* Messages Scrollbox */}

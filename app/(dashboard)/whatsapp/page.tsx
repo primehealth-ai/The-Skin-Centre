@@ -38,33 +38,29 @@ function WhatsAppContent() {
 
   const { messages, loading: messagesLoading, sendMessage } = useWhatsApp(activePhone || undefined)
 
-  // Load session expiry whenever active phone or messages change
-  useEffect(() => {
+  // Load session expiry from patients table — webhook writes here on every inbound
+  const loadSessionStatus = useCallback(async () => {
     if (!activePhone) {
       setWhatsappSessionExpiresAt(null)
       return
     }
+    const { data, error: sessionError } = await (supabase as any)
+      .from('patients')
+      .select('whatsapp_session_expires_at')
+      .eq('phone', activePhone)
+      .maybeSingle()
 
-    async function loadSessionStatus() {
-      const { data, error: sessionError } = await (supabase as any)
-        .from('missed_calls')
-        .select('whatsapp_session_expires_at')
-        .eq('patient_phone', activePhone)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle()
-
-      if (sessionError) {
-        console.error('Failed to load WhatsApp session status:', sessionError.message)
-        setWhatsappSessionExpiresAt(null)
-        return
-      }
-
-      setWhatsappSessionExpiresAt(data?.whatsapp_session_expires_at ?? null)
+    if (sessionError) {
+      console.error('Failed to load WhatsApp session status:', sessionError.message)
+      setWhatsappSessionExpiresAt(null)
+      return
     }
+    setWhatsappSessionExpiresAt(data?.whatsapp_session_expires_at ?? null)
+  }, [activePhone, supabase])
 
+  useEffect(() => {
     loadSessionStatus()
-  }, [activePhone, supabase, messages])
+  }, [loadSessionStatus, messages])
 
   // Build conversation list from messages + enrich with pending calls + patient IDs
   const loadConversations = useCallback(async () => {
@@ -321,6 +317,9 @@ function WhatsAppContent() {
             onMarkRecovered={handleMarkRecovered}
             loading={messagesLoading || convoLoading}
             onBack={() => router.push('/whatsapp')}
+            onRefresh={async () => {
+              await Promise.all([loadConversations(), loadSessionStatus()])
+            }}
           />
         </div>
       </div>
