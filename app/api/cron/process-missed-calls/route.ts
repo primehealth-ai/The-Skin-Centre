@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logError } from '@/lib/utils/logError'
-import { sendMissedCallWhatsApp } from '@/lib/whatsapp/send'
+import { sendLocationTemplate } from '@/lib/whatsapp/send'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -93,24 +93,37 @@ export async function GET(req: NextRequest) {
           continue
         }
 
-        // Resolve the live patient name from patients.full_name — missed_calls no
-        // longer stores a denormalized patient_name snapshot.
-        let livePatientName = 'Patient'
-        if (mc.patient_id) {
-          const { data: patientRow } = await supabase
-            .from('patients')
-            .select('full_name')
-            .eq('id', mc.patient_id)
-            .maybeSingle()
-          livePatientName = patientRow?.full_name || 'Patient'
+        // Look up active location template for this service type
+        const { data: template, error: templateErr } = await supabase
+          .from('message_templates')
+          .select('gupshup_template_id')
+          .eq('service_type', mc.service_type || 'General')
+          .eq('is_active', true)
+          .not('gupshup_template_id', 'is', null)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+
+        if (templateErr || !template?.gupshup_template_id) {
+          await logError('cron', templateErr || new Error('No active template'), {
+            missedCallId: mc.id,
+            serviceType: mc.service_type,
+            step: 'template_lookup',
+          })
+          continue
         }
 
-        await sendMissedCallWhatsApp({
-          phone: normalizedPhone,
-          patientName: livePatientName,
-          serviceType: mc.service_type || 'General',
-          missedCallId: mc.id,
-        })
+        const { messageId } = await sendLocationTemplate(normalizedPhone, template.gupshup_template_id)
+
+        const nowSentIso = new Date().toISOString()
+        await supabase
+          .from('missed_calls')
+          .update({
+            status: 'whatsapp_sent',
+            whatsapp_sent_at: nowSentIso,
+            whatsapp_message_id: messageId,
+          })
+          .eq('id', mc.id)
 
         processedLogs.push(`Recovered: ${mc.patient_phone}`)
       } catch (err: unknown) {

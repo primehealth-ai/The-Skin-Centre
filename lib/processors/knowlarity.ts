@@ -1,6 +1,6 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { logError } from '@/lib/utils/logError'
-import { sendMissedCallWhatsApp, sendFirstContactWhatsApp } from '@/lib/whatsapp/send'
+import { sendFirstContactWhatsApp, sendLocationTemplate } from '@/lib/whatsapp/send'
 
 type CallStatus = 'answered' | 'missed'
 
@@ -273,10 +273,6 @@ export async function processKnowlarityWebhook(payload: any): Promise<void> {
       return
     }
 
-    // Live name is used only for the outbound WhatsApp greeting — never persisted
-    // back onto missed_calls. The name is always read from patients.full_name.
-    const patientName = patient.full_name ?? 'New Patient'
-
     // Bug 3 fix (defensive guard):
     // patient_phone MUST always come from normalizedPhone (the decoded, validated
     // variable) — never directly from a raw payload field. If normalizedPhone is
@@ -345,12 +341,38 @@ export async function processKnowlarityWebhook(payload: any): Promise<void> {
     }
 
     if (!alreadySentToday) {
-      await sendMissedCallWhatsApp({
-        phone: normalizedPhone,
-        patientName,
-        serviceType,
-        missedCallId: missedCall.id,
-      })
+      // Look up active location template for this service type
+      const { data: missedTemplate, error: missedTemplateErr } = await supabase
+        .from('message_templates')
+        .select('gupshup_template_id')
+        .eq('service_type', serviceType)
+        .eq('is_active', true)
+        .not('gupshup_template_id', 'is', null)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      if (missedTemplateErr || !missedTemplate?.gupshup_template_id) {
+        await logError('webhook', missedTemplateErr || new Error(`No active template for ${serviceType}`), {
+          normalizedPhone,
+          serviceType,
+          step: 'missed_call_template_lookup',
+        })
+      } else {
+        const { messageId: sentMsgId } = await sendLocationTemplate(normalizedPhone, missedTemplate.gupshup_template_id)
+        const nowSentIso = new Date().toISOString()
+        const { error: updateSentError } = await supabase
+          .from('missed_calls')
+          .update({
+            status: 'whatsapp_sent',
+            whatsapp_sent_at: nowSentIso,
+            whatsapp_message_id: sentMsgId,
+          })
+          .eq('id', missedCall.id)
+        if (updateSentError) {
+          throw updateSentError
+        }
+      }
     } else {
       // If already sent today, write staff notes and skip sending
       const { error: updateError } = await supabase

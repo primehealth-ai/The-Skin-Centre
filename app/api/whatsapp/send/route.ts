@@ -2,28 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { logError } from '@/lib/utils/logError'
 import { isValidIndianPhone, normalizePhone } from '@/lib/utils/phone'
+import { sendLocationTemplate, sendTextTemplate } from '@/lib/whatsapp/send'
 
 export const dynamic = 'force-dynamic'
-
-// ── Clinic location — embedded in every template send as msg_type=LOCATION ───
-const CLINIC_LOCATION_JSON = JSON.stringify({
-  longitude: '85.1512566',
-  latitude: '25.6000901',
-  name: 'The Skin Centre',
-  address: "B-54, People's Cooperative Colony, Near Ganga Devi Mahila College, Patna - 800020",
-})
-
-/**
- * Build the wa_template_json component list.
- * Skin Care template has only a URL button (index 0).
- * Hair Care + General templates have URL (0) + call (1).
- */
-function getWaTemplateJson(serviceType: string): string {
-  const urlButton = { type: 'button', sub_type: 'url', index: 0, parameters: [{ type: 'text', text: '' }] }
-  const callButton = { type: 'button', sub_type: 'call', index: 1, parameters: [{ type: 'text', text: '' }] }
-  if (serviceType === 'Skin Care') return JSON.stringify({ components: [urlButton] })
-  return JSON.stringify({ components: [urlButton, callButton] })
-}
 
 export async function POST(req: NextRequest) {
   try {
@@ -34,7 +15,7 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json()
-    const { to, message, templateId, relatedMissedCallId, serviceType: bodyServiceType } = body
+    const { to, message, templateId, relatedMissedCallId } = body
 
     // WHATSAPP_SENDING_ENABLED master gate — same as automated path
     if (process.env.WHATSAPP_SENDING_ENABLED !== 'true') {
@@ -98,11 +79,11 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // Look up template — also fetches service_type as fallback when not in body
+    // Look up template — fetch template_type to decide which send function to use
     const supabaseAny = supabase as any
     const { data: templateRow, error: templateErr } = await supabaseAny
       .from('message_templates')
-      .select('id, name, message_text, gupshup_template_id, service_type')
+      .select('id, name, message_text, gupshup_template_id, service_type, template_type')
       .eq('id', templateId)
       .eq('is_active', true)
       .maybeSingle()
@@ -112,7 +93,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Failed to load template.' }, { status: 500 })
     }
 
-    console.log('[template-lookup]', { templateId, gupshup_template_id: templateRow?.gupshup_template_id })
+    console.log('[template-lookup]', {
+      templateId,
+      gupshup_template_id: templateRow?.gupshup_template_id,
+      template_type: templateRow?.template_type,
+    })
 
     if (!templateRow) {
       return NextResponse.json({ error: 'Template not found or is inactive.' }, { status: 404 })
@@ -125,79 +110,37 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // serviceType: prefer from request body (sent by frontend), fall back to DB column
-    const serviceType: string = (bodyServiceType as string) || (templateRow.service_type as string) || 'General'
-
     const facebookTemplateId = templateRow.gupshup_template_id as string
     const messageText = (templateRow.message_text as string) || (templateRow.name as string)
 
-    // ── Send the WhatsApp template via Gupshup ────────────────────────────────
-    // msg_type=LOCATION embeds the clinic pin inside the template message.
-    // wa_template_json determines which button components are included.
-    const sendBody = new URLSearchParams({
-      userid: process.env.GUPSHUP_USER_ID!,
-      password: process.env.GUPSHUP_PASSWORD!,
-      send_to: dbPhone,
-      v: '1.1',
-      format: 'json',
-      msg_type: 'LOCATION',
-      location: CLINIC_LOCATION_JSON,
-      method: 'SENDMESSAGE',
-      whatsAppTemplateId: facebookTemplateId,
-      auth_scheme: 'plain',
-      isHSM: 'true',
-      isTemplate: 'true',
-      wa_template_json: getWaTemplateJson(serviceType),
-    })
+    // ── Routing: location vs text ─────────────────────────────────────────────
+    // template_type column drives routing. Fallback: if service_type is one of
+    // our 3 clinic services, treat as location (matches original Gupshup approval).
+    const templateType: string = (templateRow.template_type as string) || 'location'
 
-    console.log('[gupshup-request]', sendBody.toString())
+    let templateMsgId = ''
 
-    const templateAbort = new AbortController()
-    const templateTimeout = setTimeout(() => templateAbort.abort(), 10000)
-    let templateRes: Response
     try {
-      console.log('[final-payload]', sendBody.toString())
-      templateRes = await fetch('https://mediaapi.smsgupshup.com/GatewayAPI/rest', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: sendBody.toString(),
-        signal: templateAbort.signal,
-      })
-    } finally {
-      clearTimeout(templateTimeout)
-    }
+      if (templateType === 'location') {
+        // sendLocationTemplate: msg_type=LOCATION, NO wa_template_json
+        const result = await sendLocationTemplate(dbPhone, facebookTemplateId)
+        templateMsgId = result.messageId
+      } else {
+        // sendTextTemplate: msg_type=text, optional var1
+        const result = await sendTextTemplate(dbPhone, facebookTemplateId)
+        templateMsgId = result.messageId
+      }
+    } catch (sendErr: unknown) {
+      const errObj = sendErr as Record<string, unknown>
+      const apiResponse = errObj?.apiResponse ?? {}
+      const errorMsg = sendErr instanceof Error ? sendErr.message : 'Gupshup send failed'
 
-    let templateApiResponse: Record<string, unknown> = {}
-    try {
-      templateApiResponse = (await templateRes.json()) as Record<string, unknown>
-    } catch {
-      templateApiResponse = {}
-    }
-
-    const templateInner = (templateApiResponse.response ?? templateApiResponse) as Record<string, unknown>
-    const templateStatus = String(templateInner.status ?? '')
-    const templateMsgId = String(templateInner.id ?? '')
-
-    // Log raw Gupshup response on every attempt so it appears in Vercel logs
-    console.log('[gupshup-http-status]', templateRes.status)
-    console.info('[manual-send] Gupshup template API response:', JSON.stringify(templateApiResponse))
-
-    if (templateStatus !== 'submitted' && templateStatus !== 'success') {
-      const errorMsg = `Gupshup template send failed (status=${templateStatus}, code=${templateInner.code ?? 'n/a'})`
-
-      // Log full Gupshup error response to error_logs for debugging
       try {
         await (supabase as any).from('error_logs').insert({
           source: 'gupshup_error',
           error_message: errorMsg,
           stack: null,
-          payload: {
-            phone: dbPhone,
-            templateId,
-            facebookTemplateId,
-            serviceType,
-            gupshupResponse: templateApiResponse,
-          },
+          payload: { phone: dbPhone, templateId, facebookTemplateId, templateType, gupshupResponse: apiResponse },
         })
       } catch (logErr) {
         console.error('[manual-send] Failed to log gupshup error:', logErr)
