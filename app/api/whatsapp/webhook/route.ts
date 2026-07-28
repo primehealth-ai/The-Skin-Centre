@@ -123,6 +123,16 @@ export async function POST(request: Request) {
       throw messageError
     }
 
+    // FIX 1 — Update 24hr session window on every inbound message
+    if (resolvedPatientId) {
+      await supabase
+        .from('patients')
+        .update({
+          whatsapp_session_expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+        })
+        .eq('phone', normalizedPhone)
+    }
+
     if (isOptOutKeyword) {
       const { error: optOutError } = await supabase
         .from('opted_out_numbers')
