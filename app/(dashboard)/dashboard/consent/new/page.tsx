@@ -64,11 +64,17 @@ function getInitials(name: string | null): string {
 
 function isCanvasEmpty(sigRef: RefObject<SignatureCanvas>): boolean {
   const canvas = sigRef.current?.getCanvas()
-  if (!canvas) return true
+  if (!canvas || canvas.width === 0 || canvas.height === 0) return true
   const ctx = canvas.getContext('2d')
   if (!ctx) return true
   const pixelData = ctx.getImageData(0, 0, canvas.width, canvas.height).data
-  return !pixelData.some((channel, i) => i % 4 !== 3 && channel !== 0)
+  // Canvas background is white; signature is non-white
+  for (let i = 0; i < pixelData.length; i += 4) {
+    if (pixelData[i] !== 255 || pixelData[i + 1] !== 255 || pixelData[i + 2] !== 255) {
+      return false
+    }
+  }
+  return true
 }
 
 // ─── Step Indicator ──────────────────────────────────────────────────────────
@@ -309,13 +315,13 @@ function NewConsentPageInner() {
 
       let dataUrl: string
       try {
-        dataUrl = sigRef.current?.getTrimmedCanvas().toDataURL('image/png') ?? ''
+        dataUrl = sigRef.current?.getCanvas().toDataURL('image/png') ?? ''
       } catch (canvasErr) {
         console.error('[SIGN CLIENT] canvas toDataURL error', canvasErr)
         setSubmitError('Could not read signature. Please try again.')
         return
       }
-      if (!dataUrl) {
+      if (!dataUrl || dataUrl.length < 100) {
         setSubmitError('Could not read signature. Please try again.')
         return
       }
