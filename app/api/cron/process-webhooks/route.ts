@@ -28,6 +28,14 @@ async function processWebhooks() {
   // Process all claimed jobs in parallel
   await Promise.all(
     queue.map(async (job: any) => {
+      if ((job.attempts ?? 0) >= 5) {
+        await supabase
+          .from('webhook_queue')
+          .update({ status: 'failed', error: 'max retries exceeded' })
+          .eq('id', job.id)
+        return
+      }
+
       try {
         await processKnowlarityWebhook(job.payload)
 

@@ -32,36 +32,10 @@ function WhatsAppContent() {
 
   const [conversations, setConversations] = useState<ChatConversation[]>([])
   const [templates, setTemplates] = useState<Template[]>([])
-  const [whatsappSessionExpiresAt, setWhatsappSessionExpiresAt] = useState<string | null>(null)
   const [convoLoading, setConvoLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   const { messages, loading: messagesLoading, sendMessage } = useWhatsApp(activePhone || undefined)
-
-  // Load session expiry from patients table — webhook writes here on every inbound
-  const loadSessionStatus = useCallback(async () => {
-    if (!activePhone) {
-      setWhatsappSessionExpiresAt(null)
-      return
-    }
-    const { data, error: sessionError } = await (supabase as any)
-      .from('patients')
-      .select('whatsapp_session_expires_at')
-      .eq('phone', activePhone)
-      .maybeSingle()
-
-    if (sessionError) {
-      console.error('Failed to load WhatsApp session status:', sessionError.message)
-      setWhatsappSessionExpiresAt(null)
-      return
-    }
-    setWhatsappSessionExpiresAt(data?.whatsapp_session_expires_at ?? null)
-  }, [activePhone, supabase])
-
-  // Fetch session on conversation open (activePhone change) and when messages update
-  useEffect(() => {
-    loadSessionStatus()
-  }, [loadSessionStatus, activePhone])
 
   // Build conversation list from messages + enrich with pending calls + patient IDs
   const loadConversations = useCallback(async () => {
@@ -163,12 +137,6 @@ function WhatsAppContent() {
         (payload: { new: Message }) => {
           const newMsg = payload.new
 
-          // Fix 2: Re-fetch session for the active phone when a new inbound message
-          // arrives. 500ms delay lets the webhook's patients UPDATE commit first.
-          if (newMsg.direction === 'inbound' && newMsg.patient_phone === activePhone) {
-            setTimeout(() => loadSessionStatus(), 500)
-          }
-
           setConversations((prev) => {
             const index = prev.findIndex((c) => c.patient_phone === newMsg.patient_phone)
             const updated = [...prev]
@@ -201,7 +169,7 @@ function WhatsAppContent() {
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [supabase, loadConversations, activePhone, loadSessionStatus])
+  }, [supabase, loadConversations])
 
   const handleSelectConversation = async (phone: string) => {
     // Mark inbound messages as read
@@ -315,10 +283,8 @@ function WhatsAppContent() {
           <ChatArea
             phone={activePhone}
             patientName={activeConvo?.patient_name ?? null}
-            patientId={activeConvo?.patientId ?? null}
             messages={messages}
             templates={templates}
-            whatsappSessionExpiresAt={whatsappSessionExpiresAt}
             onSendMessage={handleSendMessage}
             onSendTemplate={handleSendTemplate}
             hasPendingMissedCall={activeConvo?.hasPendingMissedCall ?? false}
@@ -326,7 +292,7 @@ function WhatsAppContent() {
             loading={messagesLoading || convoLoading}
             onBack={() => router.push('/whatsapp')}
             onRefresh={async () => {
-              await Promise.all([loadConversations(), loadSessionStatus()])
+              await loadConversations()
             }}
           />
         </div>

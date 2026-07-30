@@ -127,42 +127,34 @@ export async function processKnowlarityWebhook(payload: any): Promise<void> {
     // INSERTs only when the phone is genuinely new; when the row already exists it
     // is left untouched (its staff-edited full_name is preserved) and the upsert
     // returns null. We then fetch the existing row to resolve its id.
-    const { data: upsertedPatient, error: patientUpsertError } = await supabase
+    const { error: patientUpsertError } = await supabase
       .from('patients')
       .upsert(
         { phone: normalizedPhone, full_name: 'New Patient' },
         { onConflict: 'phone', ignoreDuplicates: true }
       )
-      .select('id, full_name')
-      .maybeSingle()
 
     if (patientUpsertError) {
       throw patientUpsertError
     }
 
-    // upsertedPatient is NON-NULL only when the INSERT actually happened
-    // (ignoreDuplicates:true means existing rows return null).
-    const isNewPatient = upsertedPatient !== null
+    const { data: patient, error: patientFetchError } = await supabase
+      .from('patients')
+      .select('id, full_name, first_whatsapp_sent_at')
+      .eq('phone', normalizedPhone)
+      .maybeSingle()
 
-    const patient =
-      upsertedPatient ??
-      (
-        await supabase
-          .from('patients')
-          .select('id, full_name')
-          .eq('phone', normalizedPhone)
-          .maybeSingle()
-      ).data
+    if (patientFetchError) {
+      throw patientFetchError
+    }
 
     if (!patient) {
       throw new Error(`Failed to resolve patient record for phone ${normalizedPhone}`)
     }
 
-    // FIRST-CONTACT WHATSAPP — fire for brand-new patients only.
-    // Trigger: new phone number seen for the first time, regardless of
-    // whether the call was answered or missed.
-    // Wrapped in try/catch — WhatsApp failure must NEVER fail the call record.
-    if (isNewPatient) {
+    // FIRST-CONTACT WHATSAPP — fire for every patient who has never received it.
+    // This covers both brand-new patients and older rows with NULL first_whatsapp_sent_at.
+    if (patient.first_whatsapp_sent_at === null) {
       const firstContactServiceType = clinicNumber?.service_name ?? 'General'
       try {
         const waResult = await sendFirstContactWhatsApp(
@@ -176,6 +168,7 @@ export async function processKnowlarityWebhook(payload: any): Promise<void> {
         )
       } catch (waErr) {
         console.error('[knowlarity] sendFirstContactWhatsApp threw unexpectedly:', waErr)
+        await logError('whatsapp_trigger', waErr, { phone: normalizedPhone })
       }
     }
 

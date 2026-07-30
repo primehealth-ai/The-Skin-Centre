@@ -1,11 +1,12 @@
 'use client'
-import { useState, useRef, useEffect } from 'react'
-import Link from 'next/link'
+import { useState, useRef, useEffect, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import { Sparkles, MessageSquare, AlertCircle, ChevronLeft, CheckCircle2, UserRound, PhoneMissed, RefreshCw } from 'lucide-react'
 import { MessageBubble } from './MessageBubble'
 import { Button } from '../ui/Button'
 import { formatPhoneNumber } from '@/lib/utils/formatters'
 import { Database } from '@/types/database'
+import { createClient } from '@/lib/supabase/client'
 
 type Message = Database['public']['Tables']['whatsapp_messages']['Row']
 type Template = Database['public']['Tables']['message_templates']['Row']
@@ -13,10 +14,8 @@ type Template = Database['public']['Tables']['message_templates']['Row']
 interface ChatAreaProps {
   phone: string | null
   patientName: string | null
-  patientId?: string | null
   messages: Message[]
   templates: Template[]
-  whatsappSessionExpiresAt: string | null
   onSendMessage: (text: string) => Promise<void>
   onSendTemplate: (templateId: string, serviceType: string) => Promise<void>
   hasPendingMissedCall?: boolean
@@ -29,10 +28,8 @@ interface ChatAreaProps {
 export function ChatArea({
   phone,
   patientName,
-  patientId,
   messages,
   templates,
-  whatsappSessionExpiresAt,
   onSendMessage,
   onSendTemplate,
   hasPendingMissedCall = false,
@@ -41,6 +38,9 @@ export function ChatArea({
   onBack,
   onRefresh,
 }: ChatAreaProps) {
+  const router = useRouter()
+  const supabaseRef = useRef(createClient())
+  const supabase = supabaseRef.current
   const [inputText, setInputText] = useState('')
   const [isSending, setIsSending] = useState(false)
   const [isSendingTemplate, setIsSendingTemplate] = useState(false)
@@ -49,6 +49,9 @@ export function ChatArea({
   const [selectedTemplateId, setSelectedTemplateId] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [successMsg, setSuccessMsg] = useState<string | null>(null)
+  const [patientRecordId, setPatientRecordId] = useState<string | null>(null)
+  const [isSessionOpen, setSessionOpen] = useState(false)
+  const [sessionExpiresAt, setSessionExpiresAt] = useState<string | null>(null)
   const [now, setNow] = useState(() => Date.now())
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -69,15 +72,76 @@ export function ChatArea({
     setSuccessMsg(null)
   }, [phone])
 
+  const fetchSessionStatus = useCallback(async (activePhone: string) => {
+    const { data, error: sessionError } = await supabase
+      .from('patients')
+      .select('whatsapp_session_expires_at')
+      .eq('phone', activePhone)
+      .maybeSingle()
+
+    if (sessionError) {
+      console.error('Failed to fetch WhatsApp session status:', sessionError.message)
+      setSessionOpen(false)
+      setSessionExpiresAt(null)
+      return false
+    }
+
+    const isOpen = data?.whatsapp_session_expires_at
+      ? new Date(data.whatsapp_session_expires_at) > new Date()
+      : false
+
+    setSessionOpen(isOpen)
+    setSessionExpiresAt(data?.whatsapp_session_expires_at ?? null)
+    return isOpen
+  }, [supabase])
+
+  const fetchPatientRecord = useCallback(async (activePhone: string) => {
+    const { data, error: patientError } = await supabase
+      .from('patients')
+      .select('id')
+      .eq('phone', activePhone)
+      .maybeSingle()
+
+    if (patientError) {
+      console.error('Failed to fetch patient record for WhatsApp chat:', patientError.message)
+      setPatientRecordId(null)
+      return null
+    }
+
+    const nextPatientId = data?.id ?? null
+    setPatientRecordId(nextPatientId)
+    return nextPatientId
+  }, [supabase])
+
+  useEffect(() => {
+    if (!phone) {
+      setSessionOpen(false)
+      setSessionExpiresAt(null)
+      setPatientRecordId(null)
+      return
+    }
+
+    void fetchPatientRecord(phone)
+    void fetchSessionStatus(phone)
+  }, [phone, fetchPatientRecord, fetchSessionStatus])
+
+  useEffect(() => {
+    if (!phone) {
+      return
+    }
+
+    void fetchSessionStatus(phone)
+  }, [messages, phone, fetchSessionStatus])
+
   const showSuccess = (msg: string) => {
     setSuccessMsg(msg)
     if (successTimerRef.current) clearTimeout(successTimerRef.current)
     successTimerRef.current = setTimeout(() => setSuccessMsg(null), 4000)
   }
 
-  const sessionExpiry = whatsappSessionExpiresAt ? new Date(whatsappSessionExpiresAt) : null
+  const sessionExpiry = sessionExpiresAt ? new Date(sessionExpiresAt) : null
   const hasValidExpiry = sessionExpiry !== null && !Number.isNaN(sessionExpiry.getTime())
-  const isSessionActive = hasValidExpiry && sessionExpiry!.getTime() > now
+  const isSessionActive = isSessionOpen && hasValidExpiry && sessionExpiry!.getTime() > now
   const isSessionExpired = hasValidExpiry && sessionExpiry!.getTime() <= now
 
   const sessionTime = hasValidExpiry
@@ -113,6 +177,9 @@ export function ChatArea({
       const selectedTemplate = templates.find((t) => t.id === selectedTemplateId)
       const serviceType: string = (selectedTemplate as any)?.service_type ?? 'General'
       await onSendTemplate(selectedTemplateId, serviceType)
+      if (phone) {
+        await fetchSessionStatus(phone)
+      }
       setSelectedTemplateId('')
       showSuccess('Template sent successfully')
     } catch (err: unknown) {
@@ -141,6 +208,21 @@ export function ChatArea({
     if (patientName) text = text.replace(/\{\{patient_name\}\}/g, patientName)
     text = text.replace(/\{\{clinic_name\}\}/g, 'The Skin Centre')
     setInputText(text)
+  }
+
+  const handleViewPatient = async () => {
+    if (!phone) {
+      return
+    }
+
+    const resolvedPatientId = patientRecordId ?? await fetchPatientRecord(phone)
+
+    if (!resolvedPatientId) {
+      setError('Patient profile not yet created')
+      return
+    }
+
+    router.push(`/patients/${resolvedPatientId}`)
   }
 
   if (!phone) {
@@ -199,6 +281,7 @@ export function ChatArea({
                 if (isRefreshing) return
                 setIsRefreshing(true)
                 try { await onRefresh() } finally { setIsRefreshing(false) }
+                await fetchSessionStatus(phone)
               }}
               disabled={isRefreshing}
               className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors focus:outline-none disabled:opacity-50"
@@ -206,15 +289,15 @@ export function ChatArea({
               <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
             </button>
           )}
-          {patientId && (
-            <Link
-              href={`/patients/${patientId}`}
-              className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500/30"
-            >
-              <UserRound className="h-3.5 w-3.5" />
-              View Patient
-            </Link>
-          )}
+          <button
+            type="button"
+            onClick={handleViewPatient}
+            disabled={!patientRecordId}
+            className="flex-shrink-0 flex items-center gap-1.5 rounded-lg bg-slate-100 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-600 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-800 dark:text-slate-300 enabled:hover:bg-slate-200 dark:enabled:hover:bg-slate-700"
+          >
+            <UserRound className="h-3.5 w-3.5" />
+            View Patient
+          </button>
         </div>
       </div>
 

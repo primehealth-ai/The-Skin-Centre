@@ -42,7 +42,6 @@ export async function POST(request: Request) {
   let body: WhatsAppWebhookBody | null = null
 
   try {
-    // Gupshup BSP: no HMAC signature — accept all incoming POSTs.
     body = (await request.json()) as WhatsAppWebhookBody
     const message = body.entry?.[0]?.changes?.[0]?.value?.messages?.[0]
 
@@ -61,20 +60,6 @@ export async function POST(request: Request) {
     const isOptOutKeyword = keyword === 'stop' || keyword === 'unsubscribe'
     const isOptInKeyword = keyword === 'start' || keyword === 'subscribe'
     const supabase = createServiceClient()
-
-    const { data: optedOut, error: optedOutError } = await supabase
-      .from('opted_out_numbers')
-      .select('id')
-      .eq('phone', normalizedPhone)
-      .maybeSingle()
-
-    if (optedOutError) {
-      throw optedOutError
-    }
-
-    if (optedOut && !isOptInKeyword) {
-      return new Response('OK', { status: 200 })
-    }
 
     // 2. Query: SELECT id, full_name FROM patients WHERE phone = normalizedPhone
     const { data: patient, error: patientError } = await supabase
@@ -107,15 +92,18 @@ export async function POST(request: Request) {
       resolvedPatientId = fetchedPatient?.id ?? null
     }
 
-    // FIX 1 — Update 24hr session window BEFORE inserting message
-    // (ensures patients row is updated before Realtime fires on whatsapp_messages INSERT)
+    // 3. Update the WhatsApp session BEFORE inserting the inbound message.
     const sessionExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
-    await supabase
+    const { error: sessionUpdateError } = await supabase
       .from('patients')
       .update({ whatsapp_session_expires_at: sessionExpiry })
       .eq('phone', normalizedPhone)
 
-    // Insert inbound message into whatsapp_messages
+    if (sessionUpdateError) {
+      throw sessionUpdateError
+    }
+
+    // 4. Insert inbound message into whatsapp_messages.
     const { error: messageError } = await supabase
       .from('whatsapp_messages')
       .insert({
@@ -129,35 +117,6 @@ export async function POST(request: Request) {
 
     if (messageError) {
       throw messageError
-    }
-
-    if (isOptOutKeyword) {
-      const { error: optOutError } = await supabase
-        .from('opted_out_numbers')
-        .upsert(
-          {
-            phone: normalizedPhone,
-            opted_out_at: new Date().toISOString(),
-            opted_in_at: null,
-            last_action: 'opted_out',
-          },
-          {
-            onConflict: 'phone',
-          }
-        )
-
-      if (optOutError) {
-        throw optOutError
-      }
-    } else if (isOptInKeyword) {
-      const { error: optInError } = await supabase
-        .from('opted_out_numbers')
-        .delete()
-        .eq('phone', normalizedPhone)
-
-      if (optInError) {
-        throw optInError
-      }
     }
 
     // If patient exists in DB: check missed_calls where patient_id matches and status='pending' (or 'whatsapp_sent')
@@ -192,6 +151,35 @@ export async function POST(request: Request) {
         if (updateError) {
           throw updateError
         }
+      }
+    }
+
+    if (isOptOutKeyword) {
+      const { error: optOutError } = await supabase
+        .from('opted_out_numbers')
+        .upsert(
+          {
+            phone: normalizedPhone,
+            opted_out_at: new Date().toISOString(),
+            opted_in_at: null,
+            last_action: 'opted_out',
+          },
+          {
+            onConflict: 'phone',
+          }
+        )
+
+      if (optOutError) {
+        throw optOutError
+      }
+    } else if (isOptInKeyword) {
+      const { error: optInError } = await supabase
+        .from('opted_out_numbers')
+        .delete()
+        .eq('phone', normalizedPhone)
+
+      if (optInError) {
+        throw optInError
       }
     }
   } catch (error: unknown) {
