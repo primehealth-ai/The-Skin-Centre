@@ -61,33 +61,41 @@ WHERE pc.patient_id = p.id AND pc.patient_name IS NULL;
 -- in the API; the DB check constraint above keeps values valid.
 
 -- ─── 3. Storage buckets ───────────────────────────────────────────────────────
+-- The existing bucket 'consent-signatures' is used for both signatures and generated PDFs.
+-- Ensure it exists if this migration is run on a fresh project.
 INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-VALUES ('patient-consents', 'patient-consents', false, 10485760, ARRAY['image/png','application/pdf'])
+VALUES ('consent-signatures', 'consent-signatures', false, 10485760, ARRAY['image/png','application/pdf'])
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO storage.buckets (id, name, public)
 VALUES ('clinic-assets', 'clinic-assets', false)
 ON CONFLICT (id) DO NOTHING;
 
--- Storage RLS policies for patient-consents: authenticated users can read/write
-CREATE POLICY IF NOT EXISTS patient_consents_storage_select
+-- Storage RLS policies for consent-signatures: authenticated users can read/write
+CREATE POLICY IF NOT EXISTS consent_signatures_storage_select
   ON storage.objects
   FOR SELECT
   TO authenticated
-  USING (bucket_id = 'patient-consents');
+  USING (bucket_id = 'consent-signatures');
 
-CREATE POLICY IF NOT EXISTS patient_consents_storage_insert
+CREATE POLICY IF NOT EXISTS consent_signatures_storage_insert
   ON storage.objects
   FOR INSERT
   TO authenticated
-  WITH CHECK (bucket_id = 'patient-consents');
+  WITH CHECK (bucket_id = 'consent-signatures');
 
-CREATE POLICY IF NOT EXISTS patient_consents_storage_update
+CREATE POLICY IF NOT EXISTS consent_signatures_storage_update
   ON storage.objects
   FOR UPDATE
   TO authenticated
-  USING (bucket_id = 'patient-consents')
-  WITH CHECK (bucket_id = 'patient-consents');
+  USING (bucket_id = 'consent-signatures')
+  WITH CHECK (bucket_id = 'consent-signatures');
+
+CREATE POLICY IF NOT EXISTS consent_signatures_storage_delete
+  ON storage.objects
+  FOR DELETE
+  TO authenticated
+  USING (bucket_id = 'consent-signatures');
 
 -- Storage RLS for clinic-assets: authenticated users can read (logo is read server-side too)
 CREATE POLICY IF NOT EXISTS clinic_assets_storage_select

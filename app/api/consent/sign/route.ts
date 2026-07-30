@@ -169,7 +169,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const signaturePath = `signatures/${patient_id}/${timestamp}.png`
     console.log('[SIGN API] uploading signature', { signaturePath, size: signatureBuffer.length })
     const { error: uploadError } = await supabase.storage
-      .from('patient-consents')
+      .from('consent-signatures')
       .upload(signaturePath, signatureBuffer, {
         contentType: 'image/png',
         upsert: false,

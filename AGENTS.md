@@ -137,11 +137,11 @@ Staff selects patient + active consent template
 → Fill dynamic fields → read consent with patient
 → Capture signature on tablet
 → POST /api/consent/sign
-→ Upload signature to patient-consents bucket
+→ Upload signature to consent-signatures bucket
 → Insert patient_consents row (status = 'signed')
 → POST /api/consent/generate-pdf
 → Generate PDF with @react-pdf/renderer
-→ Upload PDF to patient-consents bucket
+→ Upload PDF to consent-signatures bucket
 → Update status = 'pdf_generated', store pdf_hash
 → Return 60min signed URL
 ```
@@ -270,7 +270,7 @@ const normalize = (phone: string) =>
 - `status text` — 'signed' | 'pdf_generated' | 'void'
 
 ### Storage Buckets
-- `patient-consents` — private; signatures + generated PDFs
+- `consent-signatures` — private; signatures + generated PDFs
 - `clinic-assets` — private; `logo.jpeg` used in consent PDFs
 
 ## CALL WEBHOOK HANDLER

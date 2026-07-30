@@ -15,7 +15,7 @@ async function fetchSignatureAsBase64(
   supabase: ReturnType<typeof createServiceClient>,
   path: string
 ): Promise<string> {
-  const { data, error } = await supabase.storage.from('patient-consents').download(path)
+  const { data, error } = await supabase.storage.from('consent-signatures').download(path)
   if (error || !data) {
     throw new Error(`Failed to download signature: ${error?.message ?? 'Unknown error'}`)
   }
@@ -102,7 +102,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // Idempotent path
     if (typedConsent.status === 'pdf_generated' && typedConsent.pdf_url && typedConsent.pdf_hash) {
       const { data: signedData, error: signedError } = await supabase.storage
-        .from('patient-consents')
+        .from('consent-signatures')
         .createSignedUrl(typedConsent.pdf_url, 3600)
 
       if (signedError || !signedData?.signedUrl) {
@@ -162,7 +162,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const pdfPath = `consents/${typedConsent.patient.id}/${typedConsent.id}.pdf`
 
     const { error: uploadError } = await supabase.storage
-      .from('patient-consents')
+      .from('consent-signatures')
       .upload(pdfPath, pdfBytes, {
         contentType: 'application/pdf',
         upsert: true,
@@ -196,7 +196,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     const { data: signedData, error: signedError } = await supabase.storage
-      .from('patient-consents')
+      .from('consent-signatures')
       .createSignedUrl(pdfPath, 3600)
 
     if (signedError || !signedData?.signedUrl) {

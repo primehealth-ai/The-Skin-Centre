@@ -1,29 +1,44 @@
 import { createServiceClient } from '@/lib/supabase/server'
 
+function extractErrorMessage(error: unknown): string {
+  if (error && typeof error === 'object') {
+    const err = error as Record<string, unknown>
+    if (typeof err.message === 'string') {
+      return err.message
+    }
+    try {
+      return JSON.stringify(err)
+    } catch {
+      return String(error)
+    }
+  }
+  return String(error)
+}
+
+function isNextJsDynamicServerError(message: string): boolean {
+  return (
+    message.includes('DynamicServerError') ||
+    message.includes('Dynamic server usage') ||
+    message.includes("couldn't be rendered statically because it used")
+  )
+}
+
 export async function logError(
   source: string,
   error: unknown,
   payload?: object
 ): Promise<void> {
   try {
-    const supabase = createServiceClient()
-    let errorMessage = ''
-    if (error && typeof error === 'object') {
-      const err = error as Record<string, unknown>
-      if (typeof err.message === 'string') {
-        errorMessage = err.message
-      } else {
-        try {
-          errorMessage = JSON.stringify(err)
-        } catch {
-          errorMessage = String(error)
-        }
-      }
-    } else {
-      errorMessage = String(error)
-    }
+    const errorMessage = extractErrorMessage(error)
     const stack = error instanceof Error ? error.stack ?? null : null
 
+    // Skip known Next.js static-generation noise; it is not an application error
+    if (isNextJsDynamicServerError(errorMessage)) {
+      console.warn('[logError] ignored Next.js DynamicServerError:', errorMessage)
+      return
+    }
+
+    const supabase = createServiceClient()
     await supabase.from('error_logs').insert({
       source,
       error_message: errorMessage,
