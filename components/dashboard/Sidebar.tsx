@@ -16,7 +16,7 @@ const navItems = [
   { href: '/missed-calls', icon: PhoneMissed, label: 'Missed Calls' },
   { href: '/whatsapp', icon: MessageSquare, label: 'WhatsApp' },
   { href: '/patients', icon: Users, label: 'Patients' },
-  { href: '/consents', icon: FileText, label: 'Consents' },
+  { href: '/dashboard/consent', icon: FileText, label: 'Consents' },
   { href: '/photos', icon: Camera, label: 'Photos' },
 ]
 
@@ -73,7 +73,7 @@ export default function Sidebar({ isOpen, onClose }: { isOpen: boolean; onClose?
         {/* Navigation */}
         <nav className="flex-1 p-4 space-y-1.5 overflow-y-auto">
           {navItems.map((item) => {
-            const isActive = pathname === item.href
+            const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`)
             return (
               <Link
                 key={item.href}

@@ -9,14 +9,17 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@react-pdf/renderer": "^4.5.1",
     "@supabase/ssr": "^0.10.3",
     "@supabase/supabase-js": "^2.106.2",
+    "@types/react-signature-canvas": "^1.0.7",
     "framer-motion": "^12.40.0",
     "lucide-react": "^1.16.0",
     "next": "14.2.35",
     "pdf-lib": "^1.17.1",
     "react": "^18",
     "react-dom": "^18",
+    "react-signature-canvas": "^1.1.0-alpha.2",
     "recharts": "^3.8.1",
     "sharp": "^0.35.1"
   },

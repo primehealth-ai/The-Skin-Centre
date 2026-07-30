@@ -135,21 +135,48 @@ CREATE TABLE public.message_templates (
   language text DEFAULT 'hi'::text,
   CONSTRAINT message_templates_pkey PRIMARY KEY (id)
 );
+CREATE TABLE public.consent_templates (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  name text NOT NULL,
+  treatment_key text UNIQUE NOT NULL,
+  description text,
+  sections jsonb NOT NULL DEFAULT '[]'::jsonb,
+  dynamic_fields jsonb NOT NULL DEFAULT '[]'::jsonb,
+  has_photo_consent boolean NOT NULL DEFAULT false,
+  is_active boolean NOT NULL DEFAULT true,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT consent_templates_pkey PRIMARY KEY (id)
+);
 CREATE TABLE public.patient_consents (
   id uuid NOT NULL DEFAULT uuid_generate_v4(),
   patient_id uuid NOT NULL,
   treatment text NOT NULL,
   consent_text text NOT NULL,
+  template_id uuid,
+  consent_data jsonb DEFAULT '{}'::jsonb,
   verified_via_otp boolean DEFAULT false,
   otp_verified_at timestamp with time zone,
   signature_image_url text,
   pdf_url text,
+  pdf_hash text,
   signed_at timestamp with time zone,
   signed_by_ip text,
+  device_ip text,
+  staff_witness_id uuid,
+  staff_witness_name text,
+  patient_name text,
+  patient_age text,
+  patient_gender text,
+  photo_consent boolean NOT NULL DEFAULT false,
+  status text NOT NULL DEFAULT 'signed'
+    CHECK (status = ANY (ARRAY['signed'::text, 'pdf_generated'::text, 'void'::text])),
   created_by_staff_id uuid,
   created_at timestamp with time zone DEFAULT now(),
   CONSTRAINT patient_consents_pkey PRIMARY KEY (id),
   CONSTRAINT patient_consents_patient_id_fkey FOREIGN KEY (patient_id) REFERENCES public.patients(id),
+  CONSTRAINT patient_consents_template_id_fkey FOREIGN KEY (template_id) REFERENCES public.consent_templates(id),
+  CONSTRAINT patient_consents_staff_witness_id_fkey FOREIGN KEY (staff_witness_id) REFERENCES public.profiles(id),
   CONSTRAINT patient_consents_created_by_staff_id_fkey FOREIGN KEY (created_by_staff_id) REFERENCES public.profiles(id)
 );
 CREATE TABLE public.patient_photos (

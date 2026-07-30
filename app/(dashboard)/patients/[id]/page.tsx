@@ -2,6 +2,8 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { formatPhoneNumber } from '@/lib/utils/formatters'
+import { PatientDetailTabs } from '@/components/patients/PatientDetailTabs'
+import type { PatientConsent } from '@/lib/consent/types'
 
 type PatientPageProps = {
   params: Promise<{
@@ -24,6 +26,12 @@ export default async function PatientDetailPage({ params }: PatientPageProps) {
   if (error || !patient) {
     notFound()
   }
+
+  const { data: consents } = await supabase
+    .from('patient_consents')
+    .select('*')
+    .eq('patient_id', id)
+    .order('signed_at', { ascending: false })
 
   return (
     <div className="flex flex-col gap-6">
@@ -67,34 +75,12 @@ export default async function PatientDetailPage({ params }: PatientPageProps) {
         </div>
       </div>
 
-      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <h2 className="text-sm font-extrabold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-          Tags
-        </h2>
-        <div className="mt-3 flex flex-wrap gap-2">
-          {patient.tags && patient.tags.length > 0 ? (
-            patient.tags.map((tag: string) => (
-              <span
-                key={tag}
-                className="rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700 dark:bg-blue-950/30 dark:text-blue-300"
-              >
-                {tag}
-              </span>
-            ))
-          ) : (
-            <p className="text-sm font-semibold text-slate-500 dark:text-slate-400">No tags added</p>
-          )}
-        </div>
-      </div>
-
-      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <h2 className="text-sm font-extrabold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-          Internal Notes
-        </h2>
-        <p className="mt-3 whitespace-pre-wrap text-sm font-medium leading-7 text-slate-700 dark:text-slate-300">
-          {patient.internal_notes || 'No internal clinical notes registered for this patient.'}
-        </p>
-      </div>
+      <PatientDetailTabs
+        patientId={patient.id}
+        tags={patient.tags}
+        internalNotes={patient.internal_notes}
+        consents={(consents as PatientConsent[]) ?? []}
+      />
     </div>
   )
 }

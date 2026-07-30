@@ -19,6 +19,7 @@ Always reference database-schema.sql. Never rename tables/columns.
 - missed_calls
 - whatsapp_messages
 - message_templates
+- consent_templates
 - patient_consents
 - patient_photos
 
@@ -52,7 +53,8 @@ primehealth/
 │   │   ├── missed-calls/page.tsx
 │   │   ├── whatsapp/page.tsx   # 2-way chat
 │   │   ├── patients/page.tsx
-│   │   ├── consents/page.tsx
+│   │   ├── dashboard/consent/page.tsx        # Consent history
+│   │   ├── dashboard/consent/new/page.tsx    # Multi-step consent form
 │   │   └── photos/page.tsx
 │   └── api/
 │       ├── whatsapp/webhook/route.ts
@@ -65,11 +67,15 @@ primehealth/
 │   ├── missed-calls/# MissedCallsTable, MissedCallCard
 │   ├── whatsapp/    # ConversationList, ChatArea, MessageBubble
 │   ├── patients/    # PatientsTable, PatientDetailModal
-│   ├── consents/    # ConsentForm, SignatureCanvas
+│   ├── consents/    # PatientConsentTab, SignatureCanvas (legacy ConsentForm remains)
+│   ├── patients/    # PatientDetailTabs
 │   └── photos/      # PhotoUpload, PhotoComparison
 ├── lib/
 │   ├── supabase/client.ts
 │   ├── supabase/server.ts
+│   ├── consent/types.ts
+│   ├── consent/pdf.ts
+│   ├── consent/logo.ts
 │   ├── whatsapp/client.ts
 │   └── utils/formatters.ts
 ├── hooks/
@@ -127,10 +133,17 @@ Patient replies → Meta webhook → /api/whatsapp/webhook
 
 ### Consent Flow
 ```
-Staff creates consent → collect signature
-→ signature-only consent → Generate PDF
-→ Upload to Supabase Storage
-→ Save in patient_consents table
+Staff selects patient + active consent template
+→ Fill dynamic fields → read consent with patient
+→ Capture signature on tablet
+→ POST /api/consent/sign
+→ Upload signature to patient-consents bucket
+→ Insert patient_consents row (status = 'signed')
+→ POST /api/consent/generate-pdf
+→ Generate PDF with @react-pdf/renderer
+→ Upload PDF to patient-consents bucket
+→ Update status = 'pdf_generated', store pdf_hash
+→ Return 60min signed URL
 ```
 
 ---
@@ -232,6 +245,33 @@ const normalize = (phone: string) =>
 ### `missed_calls` table — Additional Columns (June 2026)
 - `followup_count INTEGER DEFAULT 0` — increments each time staff follows up
 - `last_followup_at TIMESTAMPTZ` — timestamp of last followup action
+
+### `consent_templates` table — New (July 2026)
+- `id uuid PK`
+- `name text`
+- `treatment_key text UNIQUE`
+- `description text`
+- `sections jsonb` — array of `{title, content, is_warning}`
+- `dynamic_fields jsonb` — array of `{key, label, type, options?, required}`
+- `has_photo_consent boolean`
+- `is_active boolean`
+
+### `patient_consents` table — Added Columns (July 2026)
+- `template_id uuid FK → consent_templates`
+- `consent_data jsonb` — filled dynamic field values
+- `pdf_hash text` — SHA-256 of generated PDF
+- `device_ip text` — captured server-side from x-forwarded-for
+- `staff_witness_id uuid FK → profiles`
+- `staff_witness_name text`
+- `patient_name text`
+- `patient_age text`
+- `patient_gender text`
+- `photo_consent boolean`
+- `status text` — 'signed' | 'pdf_generated' | 'void'
+
+### Storage Buckets
+- `patient-consents` — private; signatures + generated PDFs
+- `clinic-assets` — private; `logo.jpeg` used in consent PDFs
 
 ## CALL WEBHOOK HANDLER
 ```ts

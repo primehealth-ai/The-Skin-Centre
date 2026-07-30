@@ -338,18 +338,67 @@ export interface Database {
           updated_at?: string
         }
       }
+      consent_templates: {
+        Row: {
+          id: string
+          name: string
+          treatment_key: string
+          description: string | null
+          sections: Json
+          dynamic_fields: Json
+          has_photo_consent: boolean
+          is_active: boolean
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          name: string
+          treatment_key: string
+          description?: string | null
+          sections?: Json
+          dynamic_fields?: Json
+          has_photo_consent?: boolean
+          is_active?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          name?: string
+          treatment_key?: string
+          description?: string | null
+          sections?: Json
+          dynamic_fields?: Json
+          has_photo_consent?: boolean
+          is_active?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+      }
       patient_consents: {
         Row: {
           id: string
           patient_id: string
           treatment: string
           consent_text: string
+          template_id: string | null
+          consent_data: Json
           verified_via_otp: boolean
           otp_verified_at: string | null
           signature_image_url: string | null
           pdf_url: string | null
+          pdf_hash: string | null
           signed_at: string | null
           signed_by_ip: string | null
+          device_ip: string | null
+          staff_witness_id: string | null
+          staff_witness_name: string | null
+          patient_name: string | null
+          patient_age: string | null
+          patient_gender: string | null
+          photo_consent: boolean
+          status: 'signed' | 'pdf_generated' | 'void'
           created_by_staff_id: string | null
           created_at: string
         }
@@ -358,12 +407,23 @@ export interface Database {
           patient_id: string
           treatment: string
           consent_text: string
+          template_id?: string | null
+          consent_data?: Json
           verified_via_otp?: boolean
           otp_verified_at?: string | null
           signature_image_url?: string | null
           pdf_url?: string | null
+          pdf_hash?: string | null
           signed_at?: string | null
           signed_by_ip?: string | null
+          device_ip?: string | null
+          staff_witness_id?: string | null
+          staff_witness_name?: string | null
+          patient_name?: string | null
+          patient_age?: string | null
+          patient_gender?: string | null
+          photo_consent?: boolean
+          status?: 'signed' | 'pdf_generated' | 'void'
           created_by_staff_id?: string | null
           created_at?: string
         }
@@ -372,12 +432,23 @@ export interface Database {
           patient_id?: string
           treatment?: string
           consent_text?: string
+          template_id?: string | null
+          consent_data?: Json
           verified_via_otp?: boolean
           otp_verified_at?: string | null
           signature_image_url?: string | null
           pdf_url?: string | null
+          pdf_hash?: string | null
           signed_at?: string | null
           signed_by_ip?: string | null
+          device_ip?: string | null
+          staff_witness_id?: string | null
+          staff_witness_name?: string | null
+          patient_name?: string | null
+          patient_age?: string | null
+          patient_gender?: string | null
+          photo_consent?: boolean
+          status?: 'signed' | 'pdf_generated' | 'void'
           created_by_staff_id?: string | null
           created_at?: string
         }
