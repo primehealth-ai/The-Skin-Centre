@@ -29,9 +29,16 @@ type MetaWebhookBody = {
 // Flat Gupshup delivery event (legacy / alternative format)
 type GupshupFlatEvent = {
   externalId?: string
+  id?: string
+  msgid?: string
   messageId?: string
   eventType?: string
   event?: string
+  status?: string
+  type?: string
+  destAddr?: string
+  send_to?: string
+  phone?: string
 }
 
 type DeliveryBody = MetaWebhookBody & GupshupFlatEvent
@@ -127,7 +134,14 @@ export async function POST(request: Request) {
   let body: DeliveryBody | null = null
 
   try {
-    body = (await request.json()) as DeliveryBody
+    const contentType = request.headers.get('content-type') || ''
+    if (contentType.includes('application/json')) {
+      body = (await request.json()) as DeliveryBody
+    } else {
+      const text = await request.text()
+      const params = new URLSearchParams(text)
+      body = Object.fromEntries(params.entries()) as DeliveryBody
+    }
 
     const supabase = createServiceClient()
 
@@ -164,11 +178,12 @@ export async function POST(request: Request) {
     }
 
     // ── Path B: Flat Gupshup event format (legacy / alternative) ─────────────
-    const externalId = body.externalId ?? body.messageId ?? null
-    const eventType = (body.eventType ?? body.event ?? '').toUpperCase()
+    const externalId = body.externalId ?? body.id ?? body.msgid ?? body.messageId ?? null
+    const eventType = (body.eventType ?? body.status ?? body.type ?? body.event ?? '').toUpperCase()
+    const phone = body.destAddr ?? body.send_to ?? body.phone ?? null
 
     if (!externalId || !eventType) {
-      console.warn('[delivery-webhook] Missing externalId or eventType in payload', body)
+      console.warn('[delivery-webhook] Missing externalId or eventType in payload', { body, phone })
       return new Response('OK', { status: 200 })
     }
 

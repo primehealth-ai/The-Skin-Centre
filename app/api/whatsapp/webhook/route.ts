@@ -42,7 +42,18 @@ export async function POST(request: Request) {
   let body: WhatsAppWebhookBody | null = null
 
   try {
-    body = (await request.json()) as WhatsAppWebhookBody
+    try {
+      body = (await request.json()) as WhatsAppWebhookBody
+    } catch {
+      const text = await request.text()
+      try {
+        body = JSON.parse(text) as WhatsAppWebhookBody
+      } catch {
+        await logError('whatsapp_webhook', new Error('unparseable body'), { text: text.slice(0, 500) })
+        return new Response('OK', { status: 200 })
+      }
+    }
+
     const message = body.entry?.[0]?.changes?.[0]?.value?.messages?.[0]
 
     if (!message) {
