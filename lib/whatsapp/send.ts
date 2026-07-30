@@ -121,6 +121,54 @@ export async function sendTextTemplate(
 }
 
 // ── Helper: map serviceType → template meta_template_name ────────────────────
+export async function sendSessionTextMessage(
+  phone: string,
+  message: string,
+): Promise<{ messageId: string }> {
+  const body = new URLSearchParams({
+    userid: process.env.GUPSHUP_USER_ID!,
+    password: process.env.GUPSHUP_PASSWORD!,
+    send_to: phone,
+    v: '1.1',
+    format: 'json',
+    msg_type: 'TEXT',
+    msg: message,
+    method: 'SENDMESSAGE',
+    auth_scheme: 'plain',
+  })
+
+  console.log('[sendSessionTextMessage] payload:', body.toString())
+
+  const res = await fetch(GUPSHUP_API_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: body.toString(),
+  })
+
+  let apiResponse: Record<string, unknown> = {}
+  try {
+    apiResponse = (await res.json()) as Record<string, unknown>
+  } catch {
+    apiResponse = {}
+  }
+
+  const inner = (apiResponse.response ?? apiResponse) as Record<string, unknown>
+  const status = String(inner.status ?? '')
+  const messageId = String(inner.id ?? '')
+  const errorCode = String(inner.code ?? '')
+
+  console.info('[sendSessionTextMessage] Gupshup response:', JSON.stringify(apiResponse))
+
+  if (status !== 'submitted' && status !== 'success') {
+    throw Object.assign(
+      new Error(`Gupshup session text failed - status: ${status}, code: ${errorCode}`),
+      { apiResponse, errorCode },
+    )
+  }
+
+  return { messageId }
+}
+
 function getTemplateName(serviceType: string): string {
   if (serviceType === 'Skin Care') return 'first_contact_skin_care'
   if (serviceType === 'Hair Care') return 'hair_care'
