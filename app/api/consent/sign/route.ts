@@ -1,9 +1,9 @@
-export const dynamic = 'force-dynamic'
-
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { logError } from '@/lib/utils/logError'
 import type { ConsentTemplate, ConsentDynamicField } from '@/lib/consent/types'
+
+export const dynamic = 'force-dynamic'
 
 function calculateAge(dateOfBirth: string | null): string {
   if (!dateOfBirth) return 'N/A'
@@ -58,12 +58,15 @@ function buildConsentTextSnapshot(
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   let payload: Partial<SignConsentBody> = {}
+  console.log('[SIGN API] handler invoked')
   try {
     const userSupabase = await createClient()
+    console.log('[SIGN API] client created')
     const {
       data: { user },
       error: authError,
     } = await userSupabase.auth.getUser()
+    console.log('[SIGN API] auth checked', { userId: user?.id, authError: authError?.message })
 
     if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -97,6 +100,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     const supabase = createServiceClient()
+    console.log('[SIGN API] service client created')
 
     // Fetch patient
     const { data: patient, error: patientError } = await supabase
@@ -163,6 +167,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // Upload signature
     const timestamp = Date.now()
     const signaturePath = `signatures/${patient_id}/${timestamp}.png`
+    console.log('[SIGN API] uploading signature', { signaturePath, size: signatureBuffer.length })
     const { error: uploadError } = await supabase.storage
       .from('patient-consents')
       .upload(signaturePath, signatureBuffer, {
@@ -218,11 +223,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ error: 'Something went wrong' }, { status: 500 })
     }
 
+    console.log('[SIGN API] consent inserted', { consentId: inserted.id })
     return NextResponse.json(
       { consent_id: inserted.id, success: true },
       { status: 201 }
     )
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    const stack = error instanceof Error ? error.stack : null
+    console.error('[SIGN API] unhandled error', { message, stack })
     await logError('consent', error, {
       source: 'POST /api/consent/sign',
       payload,

@@ -1,11 +1,11 @@
-export const dynamic = 'force-dynamic'
-
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { logError } from '@/lib/utils/logError'
 import { generateConsentPDF } from '@/lib/consent/pdf'
 import { getClinicLogoBase64 } from '@/lib/consent/logo'
 import type { ConsentTemplate, PatientConsent } from '@/lib/consent/types'
+
+export const dynamic = 'force-dynamic'
 
 interface GeneratePdfBody {
   consent_id: string

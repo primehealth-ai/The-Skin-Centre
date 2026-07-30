@@ -307,12 +307,24 @@ function NewConsentPageInner() {
         return
       }
 
-      const dataUrl = sigRef.current?.getTrimmedCanvas().toDataURL('image/png')
+      let dataUrl: string
+      try {
+        dataUrl = sigRef.current?.getTrimmedCanvas().toDataURL('image/png') ?? ''
+      } catch (canvasErr) {
+        console.error('[SIGN CLIENT] canvas toDataURL error', canvasErr)
+        setSubmitError('Could not read signature. Please try again.')
+        return
+      }
       if (!dataUrl) {
         setSubmitError('Could not read signature. Please try again.')
         return
       }
 
+      console.log('[SIGN CLIENT] posting to /api/consent/sign', {
+        patient_id: patient.id,
+        template_id: selectedTemplate.id,
+        signatureLength: dataUrl.length,
+      })
       const res = await fetch('/api/consent/sign', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -325,15 +337,23 @@ function NewConsentPageInner() {
           device_ip: '',
         }),
       })
-      const json = (await res.json()) as { consent_id?: string; error?: string }
+      console.log('[SIGN CLIENT] response status', res.status)
+      const text = await res.text()
+      console.log('[SIGN CLIENT] response body preview', text.slice(0, 200))
+      const json = JSON.parse(text) as { consent_id?: string; error?: string }
       if (!res.ok) {
-        setSubmitError(json.error || 'Submission failed. Please try again.')
+        setSubmitError(json.error || `Submission failed (${res.status}). Please try again.`)
         return
       }
       setConsentId(json.consent_id ?? null)
       setStep(5)
-    } catch {
-      setSubmitError('Network error. Please check connection and try again.')
+    } catch (err) {
+      console.error('[SIGN CLIENT] fetch/parse error', err)
+      setSubmitError(
+        err instanceof Error
+          ? `Error: ${err.message}`
+          : 'Network error. Please check connection and try again.'
+      )
     } finally {
       setIsSubmitting(false)
     }

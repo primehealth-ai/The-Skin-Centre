@@ -1,8 +1,8 @@
-export const dynamic = 'force-dynamic'
-
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { logError } from '@/lib/utils/logError'
+
+export const dynamic = 'force-dynamic'
 
 interface VoidConsentBody {
   consent_id: string
