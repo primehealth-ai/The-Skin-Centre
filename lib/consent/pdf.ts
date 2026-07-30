@@ -569,12 +569,12 @@ function ConsentDocument(params: ConsentPDFParams) {
           h(
             Text,
             { style: styles.headerSubtitle },
-            'Hearing & Speech Clinic, Kankarbagh, Patna, Bihar — 800020'
+            'Dermatological Clinic, Kankarbagh, Patna, Bihar — 800020'
           ),
           h(
             Text,
             { style: styles.headerSubtitle },
-            'www.theskincentre.in | theskincentrepatna@gmail.com'
+            'www.theskincentre.in | theskincentre0@gmail.com'
           )
         )
       ),
