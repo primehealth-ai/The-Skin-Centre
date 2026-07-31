@@ -275,7 +275,7 @@ export default async function DashboardPage() {
               <div className="grid grid-cols-2 gap-3">
                 {[
                   { href: '/patients', icon: <Users size={18} className="text-blue-500" />, label: 'Patients', bg: 'bg-blue-50/50 dark:bg-blue-950/20' },
-                  { href: '/consents?tab=new', icon: <Clipboard size={18} className="text-indigo-500" />, label: 'New Consent', bg: 'bg-indigo-50/50 dark:bg-indigo-950/20' },
+                  { href: '/dashboard/consent', icon: <Clipboard size={18} className="text-indigo-500" />, label: 'Consents', bg: 'bg-indigo-50/50 dark:bg-indigo-950/20' },
                   { href: '/photos', icon: <Camera size={18} className="text-purple-500" />, label: 'Photos', bg: 'bg-purple-50/50 dark:bg-purple-950/20' },
                   { href: '/whatsapp', icon: <MessageSquare size={18} className="text-emerald-500" />, label: 'Chat', bg: 'bg-emerald-50/50 dark:bg-emerald-950/20' },
                 ].map((action) => (

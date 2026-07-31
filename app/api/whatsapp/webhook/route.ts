@@ -7,9 +7,12 @@ export const maxDuration = 60
 type WhatsAppMessage = {
   from?: string
   id?: string
+  type?: string
   text?: {
     body?: string
   }
+  image?: { id?: string }
+  video?: { id?: string }
 }
 
 type WhatsAppWebhookBody = {
@@ -17,6 +20,10 @@ type WhatsAppWebhookBody = {
     changes?: Array<{
       value?: {
         messages?: WhatsAppMessage[]
+        statuses?: Array<{
+          id?: string
+          status?: string
+        }>
       }
     }>
   }>
@@ -39,158 +46,188 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const rawBody = await request.text()
-  let body: Record<string, unknown> = {}
   try {
-    body = JSON.parse(rawBody)
-  } catch {
-    const params = new URLSearchParams(rawBody)
-    body = Object.fromEntries(params.entries())
-  }
-
-  try {
-    const message = (body as WhatsAppWebhookBody).entry?.[0]?.changes?.[0]?.value?.messages?.[0]
-
-    if (!message) {
-      return new Response('OK', { status: 200 })
+    const rawBody = await request.text()
+    let body: WhatsAppWebhookBody = {}
+    try {
+      body = JSON.parse(rawBody) as WhatsAppWebhookBody
+    } catch {
+      body = Object.fromEntries(new URLSearchParams(rawBody).entries()) as WhatsAppWebhookBody
     }
 
-    // 1. Normalize inbound phone using normalizePhone() from lib/utils/phone.ts
-    const normalizedPhone = normalizePhone(message.from ?? '')
-    if (!normalizedPhone) {
-      await logError('webhook', new Error(`Unrecognised WhatsApp sender phone: ${message.from ?? '(empty)'}`))
-      return new Response('OK', { status: 200 })
-    }
-    const messageText = message.text?.body ?? ''
-    const keyword = messageText.trim().toLowerCase()
-    const isOptOutKeyword = keyword === 'stop' || keyword === 'unsubscribe'
-    const isOptInKeyword = keyword === 'start' || keyword === 'subscribe'
+    const entry = body?.entry?.[0]
+    const change = entry?.changes?.[0]?.value
+    const messages = change?.messages || []
+    const statuses = change?.statuses || []
     const supabase = createServiceClient()
 
-    // 2. Query: SELECT id, full_name FROM patients WHERE phone = normalizedPhone
-    const { data: patient, error: patientError } = await supabase
-      .from('patients')
-      .select('id, full_name')
-      .eq('phone', normalizedPhone)
-      .maybeSingle()
-
-    if (patientError) {
-      throw patientError
+    for (const status of statuses) {
+      const eventType = status.status
+      const msgId = status.id
+      if (msgId) {
+        await supabase
+          .from('whatsapp_messages')
+          .update({
+            delivery_status: eventType,
+            ...(eventType === 'delivered' ? { delivered_at: new Date().toISOString() } : {}),
+            ...(eventType === 'read' ? { read_at: new Date().toISOString() } : {}),
+          })
+          .eq('whatsapp_message_id', msgId)
+      }
     }
 
-    // 3. If found: use existing patient_id — do NOT create new row
-    // 4. If not found: insert new patient with full_name='New Patient' using upsert
-    let resolvedPatientId: string | null = patient?.id ?? null
-    if (!patient) {
+    for (const message of messages) {
+      const fromPhone = normalizePhone(message.from ?? '')
+      if (!fromPhone) {
+        await logError('webhook', new Error(`Unrecognised WhatsApp sender phone: ${message.from ?? '(empty)'}`))
+        continue
+      }
+
+      const sessionExpiry = new Date(Date.now() + 86400000).toISOString()
       await supabase
         .from('patients')
-        .upsert(
-          { phone: normalizedPhone, full_name: 'New Patient' },
-          { onConflict: 'phone', ignoreDuplicates: true }
-        )
+        .update({ whatsapp_session_expires_at: sessionExpiry })
+        .eq('phone', fromPhone)
 
-      const { data: fetchedPatient } = await supabase
+      const { data: patient, error: patientError } = await supabase
         .from('patients')
-        .select('id')
-        .eq('phone', normalizedPhone)
+        .select('id, full_name')
+        .eq('phone', fromPhone)
         .maybeSingle()
 
-      resolvedPatientId = fetchedPatient?.id ?? null
-    }
-
-    // 3. Update the WhatsApp session BEFORE inserting the inbound message.
-    const sessionExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
-    const { error: sessionUpdateError } = await supabase
-      .from('patients')
-      .update({ whatsapp_session_expires_at: sessionExpiry })
-      .eq('phone', normalizedPhone)
-
-    if (sessionUpdateError) {
-      throw sessionUpdateError
-    }
-
-    // 4. Insert inbound message into whatsapp_messages.
-    const { error: messageError } = await supabase
-      .from('whatsapp_messages')
-      .insert({
-        patient_id: resolvedPatientId,
-        patient_phone: normalizedPhone,
-        direction: 'inbound',
-        message_text: messageText,
-        whatsapp_message_id: message.id ?? null,
-        sent_by_automation: false,
-      })
-
-    if (messageError) {
-      throw messageError
-    }
-
-    // If patient exists in DB: check missed_calls where patient_id matches and status='pending' (or 'whatsapp_sent')
-    if (resolvedPatientId) {
-      const { data: missedCall, error: missedCallError } = await supabase
-        .from('missed_calls')
-        .select('id')
-        .eq('patient_id', resolvedPatientId)
-        .in('status', ['pending', 'whatsapp_sent'])
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle()
-
-      if (missedCallError) {
-        throw missedCallError
+      if (patientError) {
+        throw patientError
       }
 
-      if (missedCall) {
-        const now = new Date()
-        const { error: updateError } = await supabase
-          .from('missed_calls')
-          .update({
-            status: 'patient_replied',
-            whatsapp_session_expires_at: new Date(
-              now.getTime() + 24 * 60 * 60 * 1000
-            ).toISOString(),
-            patient_replied_at: now.toISOString(),
-            patient_reply_text: messageText || null,
-          })
-          .eq('id', missedCall.id)
+      let resolvedPatientId: string | null = patient?.id ?? null
+      if (!patient) {
+        await supabase
+          .from('patients')
+          .upsert(
+            { phone: fromPhone, full_name: 'New Patient', whatsapp_session_expires_at: sessionExpiry },
+            { onConflict: 'phone', ignoreDuplicates: true },
+          )
 
-        if (updateError) {
-          throw updateError
+        const { data: fetchedPatient } = await supabase
+          .from('patients')
+          .select('id')
+          .eq('phone', fromPhone)
+          .maybeSingle()
+
+        resolvedPatientId = fetchedPatient?.id ?? null
+      }
+
+      let messageText = ''
+      let mediaId: string | null = null
+      switch (message.type) {
+        case 'text':
+          messageText = message.text?.body || ''
+          break
+        case 'image':
+          messageText = '📷 Image'
+          mediaId = message.image?.id ?? null
+          break
+        case 'audio':
+          messageText = '🎵 Audio message'
+          break
+        case 'video':
+          messageText = '🎬 Video message'
+          mediaId = message.video?.id ?? null
+          break
+        case 'document':
+          messageText = '📄 Document'
+          break
+        case 'location':
+          messageText = '📍 Location shared'
+          break
+        case 'sticker':
+          messageText = '🎉 Sticker'
+          break
+        default:
+          messageText = '📎 Attachment'
+          break
+      }
+
+      const { error: messageError } = await supabase
+        .from('whatsapp_messages')
+        .insert({
+          patient_id: resolvedPatientId,
+          patient_phone: fromPhone,
+          patient_name: patient?.full_name || null,
+          direction: 'inbound',
+          message_text: messageText,
+          media_id: mediaId,
+          whatsapp_message_id: message.id ?? null,
+          sent_by_automation: false,
+        })
+
+      if (messageError) {
+        throw messageError
+      }
+
+      if (resolvedPatientId) {
+        const { data: missedCall, error: missedCallError } = await supabase
+          .from('missed_calls')
+          .select('id')
+          .eq('patient_id', resolvedPatientId)
+          .in('status', ['pending', 'whatsapp_sent'])
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+
+        if (missedCallError) {
+          throw missedCallError
+        }
+
+        if (missedCall) {
+          const now = new Date()
+          const { error: updateError } = await supabase
+            .from('missed_calls')
+            .update({
+              status: 'patient_replied',
+              whatsapp_session_expires_at: sessionExpiry,
+              patient_replied_at: now.toISOString(),
+              patient_reply_text: messageText || null,
+            })
+            .eq('id', missedCall.id)
+
+          if (updateError) {
+            throw updateError
+          }
         }
       }
-    }
 
-    if (isOptOutKeyword) {
-      const { error: optOutError } = await supabase
-        .from('opted_out_numbers')
-        .upsert(
-          {
-            phone: normalizedPhone,
-            opted_out_at: new Date().toISOString(),
-            opted_in_at: null,
-            last_action: 'opted_out',
-          },
-          {
-            onConflict: 'phone',
-          }
-        )
+      const keyword = messageText.trim().toLowerCase()
+      if (keyword === 'stop' || keyword === 'unsubscribe') {
+        const { error: optOutError } = await supabase
+          .from('opted_out_numbers')
+          .upsert(
+            {
+              phone: fromPhone,
+              opted_out_at: new Date().toISOString(),
+              opted_in_at: null,
+              last_action: 'opted_out',
+            },
+            { onConflict: 'phone' },
+          )
 
-      if (optOutError) {
-        throw optOutError
-      }
-    } else if (isOptInKeyword) {
-      const { error: optInError } = await supabase
-        .from('opted_out_numbers')
-        .delete()
-        .eq('phone', normalizedPhone)
+        if (optOutError) {
+          throw optOutError
+        }
+      } else if (keyword === 'start' || keyword === 'subscribe') {
+        const { error: optInError } = await supabase
+          .from('opted_out_numbers')
+          .delete()
+          .eq('phone', fromPhone)
 
-      if (optInError) {
-        throw optInError
+        if (optInError) {
+          throw optInError
+        }
       }
     }
   } catch (error: unknown) {
     try {
-      await logError('webhook', error, body as object)
+      await logError('webhook', error)
     } catch {
       // Suppress logging error to guarantee 200 status return
     }

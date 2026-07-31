@@ -2,7 +2,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { Sparkles, MessageSquare, AlertCircle, ChevronLeft, CheckCircle2, UserRound, PhoneMissed, RefreshCw } from 'lucide-react'
-import { MessageBubble } from './MessageBubble'
 import { Button } from '../ui/Button'
 import { formatPhoneNumber } from '@/lib/utils/formatters'
 import { Database } from '@/types/database'
@@ -30,7 +29,7 @@ export function ChatArea({
   patientName,
   messages,
   templates,
-  onSendMessage,
+  onSendMessage: _onSendMessage,
   onSendTemplate,
   hasPendingMissedCall = false,
   onMarkRecovered,
@@ -53,6 +52,8 @@ export function ChatArea({
   const [isSessionOpen, setSessionOpen] = useState(false)
   const [sessionExpiresAt, setSessionExpiresAt] = useState<string | null>(null)
   const [now, setNow] = useState(() => Date.now())
+  const [realtimeMessages, setRealtimeMessages] = useState<Message[]>([])
+  const [optimisticMessages, setOptimisticMessages] = useState<Message[]>([])
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -72,7 +73,7 @@ export function ChatArea({
     setSuccessMsg(null)
   }, [phone])
 
-  const fetchSessionStatus = useCallback(async (activePhone: string) => {
+  const fetchSession = useCallback(async (activePhone: string) => {
     const { data, error: sessionError } = await supabase
       .from('patients')
       .select('whatsapp_session_expires_at')
@@ -118,20 +119,63 @@ export function ChatArea({
       setSessionOpen(false)
       setSessionExpiresAt(null)
       setPatientRecordId(null)
+      setRealtimeMessages([])
+      setOptimisticMessages([])
       return
     }
 
     void fetchPatientRecord(phone)
-    void fetchSessionStatus(phone)
-  }, [phone, fetchPatientRecord, fetchSessionStatus])
+    void fetchSession(phone)
+    setRealtimeMessages([])
+    setOptimisticMessages([])
+  }, [phone, fetchPatientRecord, fetchSession])
 
   useEffect(() => {
     if (!phone) {
       return
     }
 
-    void fetchSessionStatus(phone)
-  }, [messages, phone, fetchSessionStatus])
+    const channel = supabase
+      .channel(`whatsapp_chat_${phone}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'whatsapp_messages',
+          filter: `patient_phone=eq.${phone}`,
+        },
+        (payload: { new: Record<string, unknown> }) => {
+          const newMessage = payload.new as unknown as Message
+          if (newMessage.direction === 'inbound') {
+            void fetchSession(phone)
+          }
+          setRealtimeMessages((current) =>
+            current.some((message) => message.id === newMessage.id)
+              ? current
+              : [...current, newMessage],
+          )
+        },
+      )
+      .subscribe()
+
+    return () => {
+      void supabase.removeChannel(channel)
+    }
+  }, [phone, fetchSession, supabase])
+
+  useEffect(() => {
+    setOptimisticMessages((current) =>
+      current.filter(
+        (optimistic) =>
+          !messages.some(
+            (message) =>
+              message.whatsapp_message_id === optimistic.whatsapp_message_id ||
+              (message.direction === 'outbound' && message.message_text === optimistic.message_text),
+          ),
+      ),
+    )
+  }, [messages])
 
   const showSuccess = (msg: string) => {
     setSuccessMsg(msg)
@@ -153,14 +197,50 @@ export function ChatArea({
       }).format(sessionExpiry!)
     : ''
 
+  const displayedMessages = [...messages, ...realtimeMessages, ...optimisticMessages]
+    .filter((msg, index, all) => all.findIndex((candidate) => candidate.id === msg.id) === index)
+
   const handleSend = async (e?: React.FormEvent) => {
     e?.preventDefault()
     if (!isSessionActive || !inputText.trim() || isSending) return
+    const messageText = inputText.trim()
     try {
       setIsSending(true)
       setError(null)
-      await onSendMessage(inputText)
+      const response = await fetch('/api/whatsapp/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to: phone, message: messageText }),
+      })
+      const responseBody = await response.json().catch(() => ({}))
+
+      if (response.status === 403) {
+        setError('Session expired')
+        if (phone) await fetchSession(phone)
+        return
+      }
+
+      if (!response.ok) {
+        throw new Error(responseBody?.error || 'Failed to send message')
+      }
+
+      const sentMessage = responseBody?.data as Message | undefined
+      const optimisticMessage = sentMessage ?? ({
+        id: `optimistic-${Date.now()}`,
+        patient_id: patientRecordId,
+        patient_phone: phone,
+        patient_name: patientName,
+        whatsapp_message_id: null,
+        message_text: messageText,
+        direction: 'outbound',
+        sent_by_staff_id: null,
+        sent_by_automation: false,
+        delivery_status: 'sent',
+        sent_at: new Date().toISOString(),
+      } as Message)
+      setOptimisticMessages((current) => [...current, optimisticMessage])
       setInputText('')
+      showSuccess('Message sent')
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to send message')
     } finally {
@@ -178,7 +258,7 @@ export function ChatArea({
       const serviceType: string = (selectedTemplate as any)?.service_type ?? 'General'
       await onSendTemplate(selectedTemplateId, serviceType)
       if (phone) {
-        await fetchSessionStatus(phone)
+        await fetchSession(phone)
       }
       setSelectedTemplateId('')
       showSuccess('Template sent successfully')
@@ -281,7 +361,7 @@ export function ChatArea({
                 if (isRefreshing) return
                 setIsRefreshing(true)
                 try { await onRefresh() } finally { setIsRefreshing(false) }
-                await fetchSessionStatus(phone)
+                 await fetchSession(phone)
               }}
               disabled={isRefreshing}
               className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors focus:outline-none disabled:opacity-50"
@@ -309,16 +389,61 @@ export function ChatArea({
               Loading messages...
             </div>
           </div>
-        ) : messages.length === 0 ? (
+        ) : displayedMessages.length === 0 ? (
           <div className="flex-1 flex items-center justify-center">
             <p className="text-xs text-slate-400 dark:text-slate-500 font-semibold uppercase tracking-wider">
               No messages yet
             </p>
           </div>
         ) : (
-          messages.map((msg) => (
-            <MessageBubble key={msg.id} message={msg} />
-          ))
+          displayedMessages.map((msg) => {
+              const isOutbound = msg.direction === 'outbound'
+              const mediaPlaceholder = [
+                '📷 Image',
+                '🎵 Audio message',
+                '🎬 Video message',
+                '📄 Document',
+                '📍 Location shared',
+                '🎉 Sticker',
+                '📎 Attachment',
+              ].includes(msg.message_text)
+              const deliveryIcon =
+                msg.delivery_status === 'failed'
+                  ? '✗'
+                  : msg.delivery_status === 'read' || msg.delivery_status === 'delivered'
+                    ? '✓✓'
+                    : '✓'
+
+              return (
+                <div key={msg.id} className={`flex ${isOutbound ? 'justify-end' : 'justify-start'}`}>
+                  <div
+                    className={`max-w-[80%] rounded-2xl px-4 py-2.5 shadow-sm ${
+                      isOutbound
+                        ? 'rounded-br-md bg-blue-600 text-white'
+                        : 'rounded-bl-md bg-white text-slate-800 dark:bg-slate-900 dark:text-slate-100'
+                    }`}
+                  >
+                    <p className={mediaPlaceholder ? 'text-sm italic text-slate-400' : 'text-sm'}>
+                      {msg.message_text}
+                    </p>
+                    {mediaPlaceholder && <p className="mt-1 text-[10px] italic text-slate-400">View in WhatsApp</p>}
+                    {isOutbound && (
+                      <span
+                        className={`mt-1 block text-right text-[11px] ${
+                          msg.delivery_status === 'failed'
+                            ? 'text-red-300'
+                            : msg.delivery_status === 'read'
+                              ? 'text-blue-200'
+                              : 'text-slate-300'
+                        }`}
+                      >
+                        {deliveryIcon}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )
+            })
         )}
         <div ref={messagesEndRef} />
       </div>
@@ -425,7 +550,7 @@ export function ChatArea({
             placeholder={
               isSessionActive
                 ? 'Type your message here...'
-                : 'Session closed — use a template above to re-open conversation'
+                : 'Session closed — send a template to re-open'
             }
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}

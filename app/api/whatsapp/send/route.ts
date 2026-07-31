@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { logError } from '@/lib/utils/logError'
 import { isValidIndianPhone, normalizePhone } from '@/lib/utils/phone'
-import { sendLocationTemplate, sendSessionTextMessage, sendTextTemplate } from '@/lib/whatsapp/send'
+import { sendLocationTemplate, sendTextTemplate } from '@/lib/whatsapp/send'
 
 export const dynamic = 'force-dynamic'
 
@@ -73,9 +73,9 @@ export async function POST(req: NextRequest) {
     }
 
     if (message && !templateId) {
-      const { data: patient, error: patientErr } = await supabase
+      const { data: patientData, error: patientErr } = await createServiceClient()
         .from('patients')
-        .select('id, full_name, whatsapp_session_expires_at')
+        .select('whatsapp_session_expires_at')
         .eq('phone', dbPhone)
         .maybeSingle()
 
@@ -84,21 +84,52 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'Unable to verify WhatsApp session. Send aborted.' }, { status: 500 })
       }
 
-      const sessionOpen = patient?.whatsapp_session_expires_at
-        ? new Date(patient.whatsapp_session_expires_at) > new Date()
+      const sessionOpen = patientData?.whatsapp_session_expires_at
+        ? new Date(patientData.whatsapp_session_expires_at) > new Date()
         : false
 
       if (!sessionOpen) {
         return NextResponse.json(
-          { error: 'Session expired' },
+          { error: 'Session expired. Send a template to re-open.' },
           { status: 403 }
         )
       }
 
+      const { data: patient } = await supabase
+        .from('patients')
+        .select('id, full_name')
+        .eq('phone', dbPhone)
+        .maybeSingle()
+
+      const messageText = String(message)
+      const sendBody = new URLSearchParams({
+        userid: process.env.GUPSHUP_USER_ID!,
+        password: process.env.GUPSHUP_PASSWORD!,
+        send_to: dbPhone,
+        v: '1.1',
+        format: 'json',
+        msg_type: 'text',
+        method: 'SENDMESSAGE',
+        msg: messageText,
+        auth_scheme: 'plain',
+        isHSM: 'false',
+      })
+
       let sessionMsgId = ''
       try {
-        const result = await sendSessionTextMessage(dbPhone, message)
-        sessionMsgId = result.messageId
+        const response = await fetch('https://mediaapi.smsgupshup.com/GatewayAPI/rest', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: sendBody.toString(),
+        })
+        const apiResponse = (await response.json()) as Record<string, unknown>
+        const inner = (apiResponse.response ?? apiResponse) as Record<string, unknown>
+        const status = String(inner.status ?? '')
+        sessionMsgId = String(inner.id ?? '')
+
+        if (!response.ok || (status !== 'submitted' && status !== 'success')) {
+          throw Object.assign(new Error(`Gupshup session text failed - status: ${status}`), { apiResponse })
+        }
       } catch (sendErr: unknown) {
         const errObj = sendErr as Record<string, unknown>
         const apiResponse = errObj?.apiResponse ?? {}
