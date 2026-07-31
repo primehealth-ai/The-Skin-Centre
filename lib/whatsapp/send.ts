@@ -48,10 +48,6 @@ export async function sendLocationTemplate(
     clearTimeout(timeout)
   } catch (fetchErr) {
     clearTimeout(timeout)
-    await createServiceClient()
-      .from('patients')
-      .update({ first_whatsapp_sent_at: null })
-      .eq('phone', phone)
     await logError('gupshup_fetch', fetchErr, { phone })
     return { sent: false, reason: 'fetch_failed' }
   }
@@ -235,22 +231,6 @@ async function sendTelegramAlert(message: string): Promise<void> {
 }
 
 /**
- * Roll back patients.first_whatsapp_sent_at to NULL for a given phone.
- * Best-effort — never throws so it can be called from catch blocks safely.
- */
-async function rollbackFirstWhatsAppSentAt(patientPhone: string): Promise<void> {
-  try {
-    const supabase = createServiceClient()
-    await supabase
-      .from('patients')
-      .update({ first_whatsapp_sent_at: null })
-      .eq('phone', patientPhone)
-  } catch (err) {
-    console.error('rollbackFirstWhatsAppSentAt: failed to roll back', err)
-  }
-}
-
-/**
  * Send a first-contact WhatsApp to a patient phone using Gupshup.
  *
  * Always uses sendLocationTemplate — all 3 approved missed-call templates
@@ -264,6 +244,10 @@ async function rollbackFirstWhatsAppSentAt(patientPhone: string): Promise<void> 
  *   WHATSAPP_SENDING_ENABLED   — master gate; keep 'false' until ready to go live
  *   GUPSHUP_USER_ID            — Gupshup account userid
  *   GUPSHUP_PASSWORD           — Gupshup account password
+ *
+ * The patient timestamp is an at-most-once claim. It is deliberately not
+ * rolled back after the provider request starts: a timeout can mean Gupshup
+ * accepted the message, and retrying would create a duplicate.
  *
  * Never throws. Caller must treat all failure reasons as non-fatal.
  */
@@ -303,29 +287,7 @@ export async function sendFirstContactWhatsApp(
       return { sent: false, reason: 'opted_out' }
     }
 
-    // ── C. LIFETIME CAP — atomic, race-safe UPDATE ────────────────────────────
-    // UPDATE only fires when first_whatsapp_sent_at IS NULL.
-    // If another concurrent execution beat us, RETURNING returns 0 rows → skip.
-    const { data: lockedRows, error: lockError } = await supabase
-      .from('patients')
-      .update({ first_whatsapp_sent_at: new Date().toISOString() })
-      .eq('phone', patientPhone)
-      .is('first_whatsapp_sent_at', null)
-      .select('id')
-
-    if (lockError) {
-      await logError('whatsapp_send', lockError, { patientPhone, step: 'lifetime_cap_lock' })
-      return { sent: false, reason: 'exception' }
-    }
-
-    if (!lockedRows || lockedRows.length === 0) {
-      console.info(`[sendFirstContactWhatsApp] already_sent: ${patientPhone}`)
-      return { sent: false, reason: 'already_sent' }
-    }
-
-    // From here on, every early-return MUST call rollbackFirstWhatsAppSentAt.
-
-    // ── D. TEMPLATE LOOKUP ───────────────────────────────────────────────────
+    // ── C. TEMPLATE LOOKUP ───────────────────────────────────────────────────
     const templateName = getTemplateName(serviceType)
 
     const { data: template, error: templateError } = await supabase
@@ -340,7 +302,6 @@ export async function sendFirstContactWhatsApp(
 
     if (templateError) {
       await logError('whatsapp_send', templateError, { patientPhone, serviceType, step: 'template_lookup' })
-      await rollbackFirstWhatsAppSentAt(patientPhone)
       return { sent: false, reason: 'no_template' }
     }
 
@@ -350,11 +311,10 @@ export async function sendFirstContactWhatsApp(
         new Error(`No active template found for service_type: ${serviceType}`),
         { patientPhone, serviceType, templateName },
       )
-      await rollbackFirstWhatsAppSentAt(patientPhone)
       return { sent: false, reason: 'no_template' }
     }
 
-    // ── E. RATE LIMIT SOFT CHECK ─────────────────────────────────────────────
+    // ── D. RATE LIMIT SOFT CHECK ─────────────────────────────────────────────
     const { data: counter } = await supabase
       .from('whatsapp_send_counters')
       .select('count, warning_sent')
@@ -379,8 +339,27 @@ export async function sendFirstContactWhatsApp(
         new Error('Daily rate limit reached, skipping send'),
         { patientPhone, serviceType, currentCount },
       )
-      await rollbackFirstWhatsAppSentAt(patientPhone)
       return { sent: false, reason: 'rate_limit' }
+    }
+
+    // ── E. LIFETIME CAP — atomic, race-safe UPDATE ────────────────────────────
+    // This is an at-most-once claim. Do not clear it after a provider/network
+    // error because the provider may have accepted the request before timeout.
+    const { data: lockedRows, error: lockError } = await supabase
+      .from('patients')
+      .update({ first_whatsapp_sent_at: new Date().toISOString() })
+      .eq('phone', patientPhone)
+      .is('first_whatsapp_sent_at', null)
+      .select('id')
+
+    if (lockError) {
+      await logError('whatsapp_send', lockError, { patientPhone, step: 'lifetime_cap_lock' })
+      return { sent: false, reason: 'exception' }
+    }
+
+    if (!lockedRows || lockedRows.length === 0) {
+      console.info(`[sendFirstContactWhatsApp] already_sent: ${patientPhone}`)
+      return { sent: false, reason: 'already_sent' }
     }
 
     // ── F. GUPSHUP SEND — always location-type for first-contact templates ────
@@ -408,8 +387,6 @@ export async function sendFirstContactWhatsApp(
       } catch (logErr) {
         console.error('[sendFirstContactWhatsApp] Failed to log gupshup error:', logErr)
       }
-
-      await rollbackFirstWhatsAppSentAt(patientPhone)
 
       if (errorCode === '1002') {
         await logError('whatsapp_send', new Error(`Phone not on WhatsApp: ${patientPhone}`), { patientPhone, serviceType })
@@ -466,7 +443,6 @@ export async function sendFirstContactWhatsApp(
     return { sent: true, messageId }
 
   } catch (err: unknown) {
-    await rollbackFirstWhatsAppSentAt(patientPhone)
     try {
       await logError('whatsapp_send', err, { patientPhone, serviceType, step: 'exception' })
     } catch {

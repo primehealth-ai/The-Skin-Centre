@@ -80,6 +80,8 @@ export interface Database {
           is_active: boolean
           created_at: string
           updated_at: string
+          first_recovery_sent_at: string | null
+          first_whatsapp_sent_at: string | null
         }
         Insert: {
           id?: string
@@ -93,6 +95,8 @@ export interface Database {
           is_active?: boolean
           created_at?: string
           updated_at?: string
+          first_recovery_sent_at?: string | null
+          first_whatsapp_sent_at?: string | null
         }
         Update: {
           id?: string
@@ -106,6 +110,8 @@ export interface Database {
           is_active?: boolean
           created_at?: string
           updated_at?: string
+          first_recovery_sent_at?: string | null
+          first_whatsapp_sent_at?: string | null
         }
       }
       calls: {

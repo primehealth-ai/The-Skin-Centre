@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logError } from '@/lib/utils/logError'
-import { sendLocationTemplate } from '@/lib/whatsapp/send'
+import { normalizePhone } from '@/lib/utils/phone'
+import { sendFirstContactWhatsApp } from '@/lib/whatsapp/send'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -54,7 +55,15 @@ export async function GET(req: NextRequest) {
 
     for (const mc of claimedJobs) {
       try {
-        const normalizedPhone = mc.patient_phone.replace(/^\+/, '').replace(/^0/, '')
+        const normalizedPhone = normalizePhone(mc.patient_phone)
+        if (!normalizedPhone) {
+          await logError('cron', new Error('Invalid patient phone on missed call'), {
+            missedCallId: mc.id,
+            patientPhone: mc.patient_phone,
+            step: 'phone_normalization',
+          })
+          continue
+        }
 
         const { data: optedOut, error: optedOutError } = await supabase
           .from('opted_out_numbers')
@@ -93,45 +102,49 @@ export async function GET(req: NextRequest) {
           continue
         }
 
-        // Look up active location template for this service type
-        const { data: template, error: templateErr } = await supabase
-          .from('message_templates')
-          .select('gupshup_template_id')
-          .eq('service_type', mc.service_type || 'General')
-          .eq('is_active', true)
-          .not('gupshup_template_id', 'is', null)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle()
+        // Use the same lifetime-guarded sender as the webhook processor. This
+        // prevents a cron run from becoming a second send path.
+        const result = await sendFirstContactWhatsApp(
+          normalizedPhone,
+          mc.service_type || 'General',
+          mc.id,
+        )
 
-        if (templateErr || !template?.gupshup_template_id) {
-          await logError('cron', templateErr || new Error('No active template'), {
-            missedCallId: mc.id,
-            serviceType: mc.service_type,
-            step: 'template_lookup',
-          })
+        if (!result.sent) {
+          if ('reason' in result && result.reason === 'already_sent') {
+            const { error: skipError } = await supabase
+              .from('missed_calls')
+              .update({
+                status: 'lost',
+                staff_notes: 'Auto-skipped: WhatsApp already sent once for this number.',
+              })
+              .eq('id', mc.id)
+              .eq('status', 'pending')
+
+            if (skipError) {
+              await logError('cron', skipError, {
+                missedCallId: mc.id,
+                patientPhone: mc.patient_phone,
+                step: 'mark_lifetime_duplicate',
+              })
+            }
+          }
           continue
         }
-
-        const result = await sendLocationTemplate(normalizedPhone, template.gupshup_template_id)
-        if (!('messageId' in result)) {
-          await logError('cron', new Error('Gupshup fetch failed'), {
-            missedCallId: mc.id,
-            patientPhone: mc.patient_phone,
-          })
-          continue
-        }
-        const { messageId } = result
 
         const nowSentIso = new Date().toISOString()
-        await supabase
+        const { error: updateSentError } = await supabase
           .from('missed_calls')
           .update({
             status: 'whatsapp_sent',
             whatsapp_sent_at: nowSentIso,
-            whatsapp_message_id: messageId,
+            whatsapp_message_id: result.messageId,
           })
           .eq('id', mc.id)
+
+        if (updateSentError) {
+          throw updateSentError
+        }
 
         processedLogs.push(`Recovered: ${mc.patient_phone}`)
       } catch (err: unknown) {

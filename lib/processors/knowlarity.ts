@@ -1,6 +1,8 @@
+import { createHash } from 'crypto'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logError } from '@/lib/utils/logError'
-import { sendFirstContactWhatsApp, sendLocationTemplate } from '@/lib/whatsapp/send'
+import { normalizePhone } from '@/lib/utils/phone'
+import { sendFirstContactWhatsApp } from '@/lib/whatsapp/send'
 
 type CallStatus = 'answered' | 'missed'
 
@@ -111,7 +113,8 @@ export async function processKnowlarityWebhook(payload: any): Promise<void> {
     // Both virtual_number (calls table) and incoming_number (missed_calls table)
     // are stored from this already-decoded `virtualNumber` variable — never from
     // the raw URL-encoded payload field.
-    const normalizedPhone = decodePhone(String(rawCallerPhone))
+    const decodedCallerPhone = decodePhone(String(rawCallerPhone))
+    const normalizedPhone = normalizePhone(decodedCallerPhone) ?? decodedCallerPhone
     const virtualNumber   = decodePhone(String(rawVirtualNumber))
 
     // Lookup clinic number using the decoded exophone — matches "917XXXXXXXXX" format
@@ -152,26 +155,6 @@ export async function processKnowlarityWebhook(payload: any): Promise<void> {
       throw new Error(`Failed to resolve patient record for phone ${normalizedPhone}`)
     }
 
-    // FIRST-CONTACT WHATSAPP — fire for every patient who has never received it.
-    // This covers both brand-new patients and older rows with NULL first_whatsapp_sent_at.
-    if (patient.first_whatsapp_sent_at === null) {
-      const firstContactServiceType = clinicNumber?.service_name ?? 'General'
-      try {
-        const waResult = await sendFirstContactWhatsApp(
-          normalizedPhone,
-          firstContactServiceType,
-          null, // no related_missed_call_id yet — call row not written yet at this point
-        )
-        console.info(
-          `[knowlarity] first-contact WA for ${normalizedPhone}: sent=${waResult.sent}`,
-          'reason' in waResult ? waResult.reason : `msgId=${waResult.messageId}`,
-        )
-      } catch (waErr) {
-        console.error('[knowlarity] sendFirstContactWhatsApp threw unexpectedly:', waErr)
-        await logError('whatsapp_trigger', waErr, { phone: normalizedPhone })
-      }
-    }
-
     // Resolve call status from agent_number + call_transfer_status.
     // Knowlarity always sends call_status="Connected" — that field is unreliable.
     const {
@@ -186,7 +169,12 @@ export async function processKnowlarityWebhook(payload: any): Promise<void> {
     // Item 19 fix: if all UUID sources are absent, generate a stable fallback rather
     // than storing an empty string that would UNIQUE-violate on the second empty payload.
     const rawCallSid = payload?.call_uuid ?? payload?.call_sid ?? payload?.CallSid ?? payload?.callSid ?? ''
-    const callSid: string = rawCallSid.trim() !== '' ? rawCallSid.trim() : crypto.randomUUID()
+    const rawCallSidText = String(rawCallSid).trim()
+    // A random fallback defeats webhook retry idempotency. Hash the payload so
+    // the same provider retry maps to the same calls row instead.
+    const callSid: string = rawCallSidText !== ''
+      ? rawCallSidText
+      : `fallback-${createHash('sha256').update(JSON.stringify(payload ?? {})).digest('hex')}`
     const rawDialWhomNumber = payload?.dial_whom_number ?? payload?.DialWhomNumber ?? ''
     const dialWhomNumber = rawDialWhomNumber ? decodePhone(String(rawDialWhomNumber)) : null
 
@@ -261,8 +249,14 @@ export async function processKnowlarityWebhook(payload: any): Promise<void> {
 
     // isMissedCall is already resolved above via resolveKnowlarityStatus().
     // agent_number + call_transfer_status are the authoritative signals.
+    const serviceType = clinicNumber?.service_name ?? 'General'
 
     if (!isMissedCall) {
+      const waResult = await sendFirstContactWhatsApp(normalizedPhone, serviceType, null)
+      console.info(
+        `[knowlarity] first-contact WA for ${normalizedPhone}: sent=${waResult.sent}`,
+        'reason' in waResult ? waResult.reason : `msgId=${waResult.messageId}`,
+      )
       return
     }
 
@@ -298,94 +292,61 @@ export async function processKnowlarityWebhook(payload: any): Promise<void> {
       throw missedCallError
     }
 
-    // If missedCall is null it means the row already existed (ignoreDuplicates) —
-    // a Knowlarity retry. No WhatsApp send needed; exit cleanly.
-    if (!missedCall) {
-      return
-    }
+    let missedCallId = missedCall?.id ?? null
 
-    // IST midnight boundary calculation
-    const formatter = new Intl.DateTimeFormat('en-US', {
-      timeZone: 'Asia/Kolkata',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit'
-    })
-    const parts = formatter.formatToParts(now)
-    const yearStr = parts.find(p => p.type === 'year')?.value
-    const monthStr = parts.find(p => p.type === 'month')?.value
-    const dayStr = parts.find(p => p.type === 'day')?.value
-    const todayMidnightUTC = new Date(`${yearStr}-${monthStr}-${dayStr}T00:00:00+05:30`)
-
-    const serviceType = clinicNumber?.service_name ?? 'General'
-
-    const { data: alreadySentToday, error: alreadySentError } = await supabase
-      .from('missed_calls')
-      .select('id')
-      .eq('patient_id', patient.id)
-      .not('whatsapp_sent_at', 'is', null)
-      .gte('whatsapp_sent_at', todayMidnightUTC.toISOString())
-      .neq('id', missedCall.id)
-      .limit(1)
-      .maybeSingle()
-
-    if (alreadySentError) {
-      throw alreadySentError
-    }
-
-    if (!alreadySentToday) {
-      // Look up active location template for this service type
-      const { data: missedTemplate, error: missedTemplateErr } = await supabase
-        .from('message_templates')
-        .select('gupshup_template_id')
-        .eq('service_type', serviceType)
-        .eq('is_active', true)
-        .not('gupshup_template_id', 'is', null)
-        .order('created_at', { ascending: false })
-        .limit(1)
+    // The database trigger may have created this row before the application
+    // upsert. Resolve it instead of treating that normal case as a no-op.
+    if (!missedCallId) {
+      const { data: existingMissedCall, error: existingMissedCallError } = await supabase
+        .from('missed_calls')
+        .select('id, status')
+        .eq('call_id', newCall.id)
         .maybeSingle()
 
-      if (missedTemplateErr || !missedTemplate?.gupshup_template_id) {
-        await logError('webhook', missedTemplateErr || new Error(`No active template for ${serviceType}`), {
-          normalizedPhone,
-          serviceType,
-          step: 'missed_call_template_lookup',
-        })
-      } else {
-        const result = await sendLocationTemplate(normalizedPhone, missedTemplate.gupshup_template_id)
-        if ('messageId' in result) {
-          const sentMsgId = result.messageId
-          const nowSentIso = new Date().toISOString()
-          const { error: updateSentError } = await supabase
-            .from('missed_calls')
-            .update({
-              status: 'whatsapp_sent',
-              whatsapp_sent_at: nowSentIso,
-              whatsapp_message_id: sentMsgId,
-            })
-            .eq('id', missedCall.id)
-          if (updateSentError) {
-            throw updateSentError
-          }
-        } else {
-          await logError('webhook', new Error('Gupshup fetch failed'), {
-            normalizedPhone,
-            serviceType,
-            step: 'send_location_template',
-          })
-        }
+      if (existingMissedCallError) {
+        throw existingMissedCallError
       }
-    } else {
-      // If already sent today, write staff notes and skip sending
-      const { error: updateError } = await supabase
+
+      missedCallId = existingMissedCall?.id ?? null
+    }
+
+    if (!missedCallId) {
+      throw new Error(`Failed to resolve missed call record for call ${newCall.id}`)
+    }
+
+    // The webhook processor and the backup cron both call this same guarded
+    // sender. The patient row is the cross-clinic, lifetime idempotency key.
+    const waResult = await sendFirstContactWhatsApp(normalizedPhone, serviceType, missedCallId)
+    console.info(
+      `[knowlarity] first-contact WA for ${normalizedPhone}: sent=${waResult.sent}`,
+      'reason' in waResult ? waResult.reason : `msgId=${waResult.messageId}`,
+    )
+
+    if (waResult.sent) {
+      const { error: updateSentError } = await supabase
         .from('missed_calls')
         .update({
-          staff_notes: 'Auto-skipped: WhatsApp already sent today'
+          status: 'whatsapp_sent',
+          whatsapp_sent_at: new Date().toISOString(),
+          whatsapp_message_id: waResult.messageId,
         })
-        .eq('id', missedCall.id)
+        .eq('id', missedCallId)
 
-      if (updateError) {
-        throw updateError
+      if (updateSentError) {
+        throw updateSentError
+      }
+    } else if ('reason' in waResult && waResult.reason === 'already_sent') {
+      const { error: updateSkipError } = await supabase
+        .from('missed_calls')
+        .update({
+          status: 'lost',
+          staff_notes: 'Auto-skipped: WhatsApp already sent once for this number.',
+        })
+        .eq('id', missedCallId)
+        .eq('status', 'pending')
+
+      if (updateSkipError) {
+        throw updateSkipError
       }
     }
   } catch (error: unknown) {
