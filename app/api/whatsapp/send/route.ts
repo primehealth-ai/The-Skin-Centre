@@ -72,7 +72,7 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    if (!templateId) {
+    if (message && !templateId) {
       const { data: patient, error: patientErr } = await supabase
         .from('patients')
         .select('id, full_name, whatsapp_session_expires_at')
@@ -90,8 +90,8 @@ export async function POST(req: NextRequest) {
 
       if (!sessionOpen) {
         return NextResponse.json(
-          { error: 'WhatsApp session is closed. Please select a template.' },
-          { status: 400 }
+          { error: 'Session expired' },
+          { status: 403 }
         )
       }
 
@@ -194,6 +194,9 @@ export async function POST(req: NextRequest) {
       if (templateType === 'location') {
         // sendLocationTemplate: msg_type=LOCATION, NO wa_template_json
         const result = await sendLocationTemplate(dbPhone, facebookTemplateId)
+        if (!('messageId' in result)) {
+          return NextResponse.json({ error: 'Gupshup fetch failed' }, { status: 502 })
+        }
         templateMsgId = result.messageId
       } else {
         // sendTextTemplate: msg_type=text, optional var1

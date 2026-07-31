@@ -352,18 +352,27 @@ export async function processKnowlarityWebhook(payload: any): Promise<void> {
           step: 'missed_call_template_lookup',
         })
       } else {
-        const { messageId: sentMsgId } = await sendLocationTemplate(normalizedPhone, missedTemplate.gupshup_template_id)
-        const nowSentIso = new Date().toISOString()
-        const { error: updateSentError } = await supabase
-          .from('missed_calls')
-          .update({
-            status: 'whatsapp_sent',
-            whatsapp_sent_at: nowSentIso,
-            whatsapp_message_id: sentMsgId,
+        const result = await sendLocationTemplate(normalizedPhone, missedTemplate.gupshup_template_id)
+        if ('messageId' in result) {
+          const sentMsgId = result.messageId
+          const nowSentIso = new Date().toISOString()
+          const { error: updateSentError } = await supabase
+            .from('missed_calls')
+            .update({
+              status: 'whatsapp_sent',
+              whatsapp_sent_at: nowSentIso,
+              whatsapp_message_id: sentMsgId,
+            })
+            .eq('id', missedCall.id)
+          if (updateSentError) {
+            throw updateSentError
+          }
+        } else {
+          await logError('webhook', new Error('Gupshup fetch failed'), {
+            normalizedPhone,
+            serviceType,
+            step: 'send_location_template',
           })
-          .eq('id', missedCall.id)
-        if (updateSentError) {
-          throw updateSentError
         }
       }
     } else {

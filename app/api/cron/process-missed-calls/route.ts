@@ -113,7 +113,15 @@ export async function GET(req: NextRequest) {
           continue
         }
 
-        const { messageId } = await sendLocationTemplate(normalizedPhone, template.gupshup_template_id)
+        const result = await sendLocationTemplate(normalizedPhone, template.gupshup_template_id)
+        if (!('messageId' in result)) {
+          await logError('cron', new Error('Gupshup fetch failed'), {
+            missedCallId: mc.id,
+            patientPhone: mc.patient_phone,
+          })
+          continue
+        }
+        const { messageId } = result
 
         const nowSentIso = new Date().toISOString()
         await supabase

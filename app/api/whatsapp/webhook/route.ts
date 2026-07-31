@@ -39,22 +39,17 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  let body: WhatsAppWebhookBody | null = null
+  const rawBody = await request.text()
+  let body: Record<string, unknown> = {}
+  try {
+    body = JSON.parse(rawBody)
+  } catch {
+    const params = new URLSearchParams(rawBody)
+    body = Object.fromEntries(params.entries())
+  }
 
   try {
-    try {
-      body = (await request.json()) as WhatsAppWebhookBody
-    } catch {
-      const text = await request.text()
-      try {
-        body = JSON.parse(text) as WhatsAppWebhookBody
-      } catch {
-        await logError('whatsapp_webhook', new Error('unparseable body'), { text: text.slice(0, 500) })
-        return new Response('OK', { status: 200 })
-      }
-    }
-
-    const message = body.entry?.[0]?.changes?.[0]?.value?.messages?.[0]
+    const message = (body as WhatsAppWebhookBody).entry?.[0]?.changes?.[0]?.value?.messages?.[0]
 
     if (!message) {
       return new Response('OK', { status: 200 })
@@ -195,7 +190,7 @@ export async function POST(request: Request) {
     }
   } catch (error: unknown) {
     try {
-      await logError('webhook', error, body ?? undefined)
+      await logError('webhook', error, body as object)
     } catch {
       // Suppress logging error to guarantee 200 status return
     }

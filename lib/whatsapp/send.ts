@@ -16,7 +16,7 @@ const GUPSHUP_API_URL = 'https://mediaapi.smsgupshup.com/GatewayAPI/rest'
 export async function sendLocationTemplate(
   phone: string,
   templateId: string,
-): Promise<{ messageId: string }> {
+): Promise<{ messageId: string } | { sent: false; reason: 'fetch_failed' }> {
   const body = new URLSearchParams({
     userid: process.env.GUPSHUP_USER_ID!,
     password: process.env.GUPSHUP_PASSWORD!,
@@ -34,11 +34,27 @@ export async function sendLocationTemplate(
 
   console.log('[sendLocationTemplate] payload:', body.toString())
 
-  const res = await fetch(GUPSHUP_API_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: body.toString(),
-  })
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 15000)
+
+  let res: Response
+  try {
+    res = await fetch(GUPSHUP_API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString(),
+      signal: controller.signal,
+    })
+    clearTimeout(timeout)
+  } catch (fetchErr) {
+    clearTimeout(timeout)
+    await createServiceClient()
+      .from('patients')
+      .update({ first_whatsapp_sent_at: null })
+      .eq('phone', phone)
+    await logError('gupshup_fetch', fetchErr, { phone })
+    return { sent: false, reason: 'fetch_failed' }
+  }
 
   let apiResponse: Record<string, unknown> = {}
   try {
@@ -131,10 +147,12 @@ export async function sendSessionTextMessage(
     send_to: phone,
     v: '1.1',
     format: 'json',
-    msg_type: 'TEXT',
-    msg: message,
+    msg_type: 'text',
     method: 'SENDMESSAGE',
+    msg: message,
     auth_scheme: 'plain',
+    isHSM: 'false',
+    isTemplate: 'false',
   })
 
   console.log('[sendSessionTextMessage] payload:', body.toString())
@@ -179,7 +197,7 @@ function getTemplateName(serviceType: string): string {
 
 type GupshupSendResult =
   | { sent: true; messageId: string }
-  | { sent: false; reason: 'disabled' | 'opted_out' | 'already_sent' | 'no_template' | 'rate_limit' | 'not_on_whatsapp' | 'wallet_empty' | 'api_error' | 'exception' }
+  | { sent: false; reason: 'disabled' | 'opted_out' | 'already_sent' | 'no_template' | 'rate_limit' | 'not_on_whatsapp' | 'wallet_empty' | 'api_error' | 'exception' | 'fetch_failed' }
 
 type GupshupApiResponse = {
   response?: {
@@ -369,6 +387,9 @@ export async function sendFirstContactWhatsApp(
     let messageId = ''
     try {
       const result = await sendLocationTemplate(patientPhone, template.gupshup_template_id)
+      if (!('messageId' in result)) {
+        return result
+      }
       messageId = result.messageId
     } catch (sendErr: unknown) {
       // Log full Gupshup error response
