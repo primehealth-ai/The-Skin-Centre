@@ -73,6 +73,13 @@ export async function POST(req: NextRequest) {
     }
 
     if (message && !templateId) {
+      if (!process.env.GUPSHUP_TWOWAY_USER_ID || !process.env.GUPSHUP_TWOWAY_PASSWORD) {
+        return NextResponse.json(
+          { error: 'Two-Way account not configured' },
+          { status: 503 }
+        )
+      }
+
       const { data: patientData, error: patientErr } = await createServiceClient()
         .from('patients')
         .select('whatsapp_session_expires_at')
@@ -103,8 +110,8 @@ export async function POST(req: NextRequest) {
 
       const messageText = String(message)
       const sendBody = new URLSearchParams({
-        userid: process.env.GUPSHUP_USER_ID!,
-        password: process.env.GUPSHUP_PASSWORD!,
+        userid: process.env.GUPSHUP_TWOWAY_USER_ID!,
+        password: process.env.GUPSHUP_TWOWAY_PASSWORD!,
         send_to: dbPhone,
         v: '1.1',
         format: 'json',
