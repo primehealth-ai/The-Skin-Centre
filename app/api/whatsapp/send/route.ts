@@ -73,118 +73,130 @@ export async function POST(req: NextRequest) {
     }
 
     if (message && !templateId) {
-      if (!process.env.GUPSHUP_TWOWAY_USER_ID || !process.env.GUPSHUP_TWOWAY_PASSWORD) {
+      const twowayUserId = process.env.GUPSHUP_TWOWAY_USER_ID
+      const twowayPassword = process.env.GUPSHUP_TWOWAY_PASSWORD
+
+      if (!twowayUserId || !twowayPassword) {
+        console.error('[free-form] Missing Two-Way credentials:', {
+          hasUserId: !!twowayUserId,
+          hasPassword: !!twowayPassword,
+        })
         return NextResponse.json(
-          { error: 'Two-Way account not configured' },
+          { error: 'Two-Way account not configured. Contact admin.' },
           { status: 503 }
         )
       }
 
-      const { data: patientData, error: patientErr } = await createServiceClient()
-        .from('patients')
-        .select('whatsapp_session_expires_at')
-        .eq('phone', dbPhone)
-        .maybeSingle()
-
-      if (patientErr) {
-        await logError('whatsapp', patientErr, { route: 'manual-send', step: 'session_lookup', phone: dbPhone })
-        return NextResponse.json({ error: 'Unable to verify WhatsApp session. Send aborted.' }, { status: 500 })
-      }
-
-      const sessionOpen = patientData?.whatsapp_session_expires_at
-        ? new Date(patientData.whatsapp_session_expires_at) > new Date()
-        : false
-
-      if (!sessionOpen) {
-        return NextResponse.json(
-          { error: 'Session expired. Send a template to re-open.' },
-          { status: 403 }
-        )
-      }
-
-      const { data: patient } = await supabase
-        .from('patients')
-        .select('id, full_name')
-        .eq('phone', dbPhone)
-        .maybeSingle()
-
-      const messageText = String(message)
-      const sendBody = new URLSearchParams({
-        userid: process.env.GUPSHUP_TWOWAY_USER_ID!,
-        password: process.env.GUPSHUP_TWOWAY_PASSWORD!,
-        send_to: dbPhone,
-        v: '1.1',
-        format: 'json',
-        msg_type: 'text',
-        method: 'SENDMESSAGE',
-        msg: messageText,
-        auth_scheme: 'plain',
-        isHSM: 'false',
-      })
-
-      let sessionMsgId = ''
       try {
+        const { data: patientData, error: patientErr } = await createServiceClient()
+          .from('patients')
+          .select('whatsapp_session_expires_at')
+          .eq('phone', dbPhone)
+          .maybeSingle()
+
+        if (patientErr) {
+          await logError('whatsapp', patientErr, { route: 'manual-send', step: 'session_lookup', phone: dbPhone })
+          return NextResponse.json({ error: 'Unable to verify WhatsApp session. Send aborted.' }, { status: 500 })
+        }
+
+        const sessionOpen = patientData?.whatsapp_session_expires_at
+          ? new Date(patientData.whatsapp_session_expires_at) > new Date()
+          : false
+
+        if (!sessionOpen) {
+          return NextResponse.json(
+            { error: 'Session expired. Send a template to re-open.' },
+            { status: 403 }
+          )
+        }
+
+        const { data: patient } = await supabase
+          .from('patients')
+          .select('id, full_name')
+          .eq('phone', dbPhone)
+          .maybeSingle()
+
+        const messageText = String(message)
+        const sendBody = new URLSearchParams({
+          userid: twowayUserId,
+          password: twowayPassword,
+          send_to: dbPhone,
+          v: '1.1',
+          format: 'json',
+          msg_type: 'text',
+          method: 'SENDMESSAGE',
+          msg: messageText,
+          auth_scheme: 'plain',
+          isHSM: 'false',
+        })
+
+        console.log('[free-form] Sending to:', dbPhone, 'userid:', twowayUserId)
+
         const response = await fetch('https://mediaapi.smsgupshup.com/GatewayAPI/rest', {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body: sendBody.toString(),
+          signal: AbortSignal.timeout(15000),
         })
-        const apiResponse = (await response.json()) as Record<string, unknown>
-        const inner = (apiResponse.response ?? apiResponse) as Record<string, unknown>
-        const status = String(inner.status ?? '')
-        sessionMsgId = String(inner.id ?? '')
 
-        if (!response.ok || (status !== 'submitted' && status !== 'success')) {
-          throw Object.assign(new Error(`Gupshup session text failed - status: ${status}`), { apiResponse })
-        }
-      } catch (sendErr: unknown) {
-        const errObj = sendErr as Record<string, unknown>
-        const apiResponse = errObj?.apiResponse ?? {}
-        const errorMsg = sendErr instanceof Error ? sendErr.message : 'Gupshup send failed'
+        const responseText = await response.text()
+        console.log('[free-form] Gupshup raw response:', responseText)
 
+        let parsed: any = {}
         try {
-          await (supabase as any).from('error_logs').insert({
-            source: 'gupshup_error',
-            error_message: errorMsg,
-            stack: null,
-            payload: { phone: dbPhone, templateId: null, messageType: 'session_text', gupshupResponse: apiResponse },
-          })
-        } catch (logErr) {
-          console.error('[manual-send] Failed to log gupshup error:', logErr)
+          parsed = JSON.parse(responseText)
+        } catch {
+          parsed = { raw: responseText }
         }
 
-        return NextResponse.json({ error: errorMsg }, { status: 502 })
+        const status = parsed?.response?.status || parsed?.status || 'unknown'
+        console.log('[free-form] Gupshup status:', status)
+
+        if (status !== 'success') {
+          return NextResponse.json(
+            { error: `Gupshup session text failed - status: ${status}, detail: ${responseText.slice(0, 200)}` },
+            { status: 502 }
+          )
+        }
+
+        const sessionMsgId = String(parsed?.response?.id || parsed?.id || '')
+        const nowIso = new Date().toISOString()
+        const { data: loggedMsg, error: insertErr } = await supabase
+          .from('whatsapp_messages')
+          .insert({
+            patient_id: patient?.id || null,
+            patient_phone: dbPhone,
+            patient_name: patient?.full_name || null,
+            whatsapp_message_id: sessionMsgId || null,
+            message_text: message,
+            direction: 'outbound',
+            sent_by_staff_id: user.id,
+            sent_by_automation: false,
+            delivery_status: 'sent',
+            sent_at: nowIso,
+            related_missed_call_id: relatedMissedCallId || null,
+          })
+          .select()
+          .single()
+
+        if (insertErr) {
+          await logError('whatsapp', insertErr, {
+            route: 'manual-send',
+            phone: dbPhone,
+            templateId: null,
+            relatedMissedCallId: relatedMissedCallId || null,
+          })
+        }
+
+        return NextResponse.json({ success: true, data: loggedMsg }, { status: 200 })
+      } catch (err) {
+        console.error('[free-form] Unexpected error:', err)
+        await logError('whatsapp_freeform', err, { phone: dbPhone })
+        return NextResponse.json(
+          { error: 'Internal error sending message' },
+          { status: 500 }
+        )
       }
-
-      const nowIso = new Date().toISOString()
-      const { data: loggedMsg, error: insertErr } = await supabase
-        .from('whatsapp_messages')
-        .insert({
-          patient_id: patient?.id || null,
-          patient_phone: dbPhone,
-          patient_name: patient?.full_name || null,
-          whatsapp_message_id: sessionMsgId || null,
-          message_text: message,
-          direction: 'outbound',
-          sent_by_staff_id: user.id,
-          sent_by_automation: false,
-          delivery_status: 'sent',
-          sent_at: nowIso,
-          related_missed_call_id: relatedMissedCallId || null,
-        })
-        .select()
-        .single()
-
-      if (insertErr) {
-        await logError('whatsapp', insertErr, {
-          route: 'manual-send',
-          phone: dbPhone,
-          templateId: null,
-          relatedMissedCallId: relatedMissedCallId || null,
-        })
-      }
-
-      return NextResponse.json({ success: true, data: loggedMsg }, { status: 200 })
     }
 
     // Look up template — fetch template_type to decide which send function to use
