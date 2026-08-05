@@ -4,7 +4,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { logError } from '@/lib/utils/logError'
-import sharp from 'sharp'
 
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp']
 const MAX_BYTES = 5 * 1024 * 1024 // 5 MB
@@ -86,37 +85,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const arrayBuffer = await file.arrayBuffer()
     const buffer = Buffer.from(arrayBuffer)
 
-    let processedBuffer: any = buffer
-    if (file.type.startsWith('image/')) {
-      try {
-        let image = sharp(buffer)
-        const metadata = await image.metadata()
-
-        if (metadata.width && metadata.height && (metadata.width > 1600 || metadata.height > 1600)) {
-          image = image.resize({
-            width: 1600,
-            height: 1600,
-            fit: 'inside',
-            withoutEnlargement: true,
-          })
-        }
-
-        if (file.type === 'image/png') {
-          image = image.png({ quality: 80, compressionLevel: 8 })
-        } else if (file.type === 'image/webp') {
-          image = image.webp({ quality: 80 })
-        } else {
-          image = image.jpeg({ quality: 80, progressive: true })
-        }
-
-        processedBuffer = await image.toBuffer()
-      } catch (err) {
-        console.warn('Image compression failed, uploading original buffer:', err)
-      }
-    }
-
     const { error: uploadError } = await Promise.race([
-      supabase.storage.from('patient-photos').upload(storagePath, processedBuffer, {
+      supabase.storage.from('patient-photos').upload(storagePath, buffer, {
         contentType: file.type,
         upsert: false,
       }),
