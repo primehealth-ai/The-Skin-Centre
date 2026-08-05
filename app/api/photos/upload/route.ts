@@ -78,9 +78,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     // ── Build storage path ───────────────────────────────────────────────────
-    const ext = file.type.split('/')[1].replace('jpeg', 'jpg')
     const timestamp = Date.now()
-    const storagePath = `patients/${patientId}/${photoType}/${timestamp}.${ext}`
+    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
+    const storagePath = `patients/${patientId}/${photoType}/${timestamp}_${safeName}`
 
     // ── Upload to Supabase Storage ───────────────────────────────────────────
     const arrayBuffer = await file.arrayBuffer()
@@ -115,15 +115,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       }
     }
 
-    const { error: uploadError } = await supabase.storage
-      .from('patient-photos')
-      .upload(storagePath, processedBuffer, {
+    const { error: uploadError } = await Promise.race([
+      supabase.storage.from('patient-photos').upload(storagePath, processedBuffer, {
         contentType: file.type,
         upsert: false,
-      })
+      }),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Upload timeout')), 30000)
+      ),
+    ]).catch((err) => ({ error: err instanceof Error ? err : new Error(String(err)) }))
 
     if (uploadError) {
-      throw new Error(`Storage upload failed: ${uploadError.message}`)
+      await logError('photo_upload', uploadError, { path: storagePath, contentType: file.type })
+      return NextResponse.json(
+        { error: `Storage upload failed: ${uploadError.message}` },
+        { status: 500 }
+      )
     }
 
     // ── Insert DB record (store storage path, never public URL) ──────────────

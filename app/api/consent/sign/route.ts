@@ -23,6 +23,9 @@ interface SignConsentBody {
   template_id: string
   consent_data: Record<string, string | boolean>
   signature_data_url: string
+  witness_name: string
+  witness_signature_data_url: string
+  doctor_signature_data_url: string
   photo_consent: boolean
   device_ip?: string
 }
@@ -49,10 +52,11 @@ function buildConsentTextSnapshot(
 
   return JSON.stringify({
     template_name: template.name,
-    template_treatment_key: template.treatment_key,
-    sections_snapshot: template.sections,
-    fields_snapshot: fieldsSnapshot,
+    treatment_key: template.treatment_key,
+    sections: template.sections,
+    filled_fields: fieldsSnapshot,
     filled_values: consentData,
+    signed_at: new Date().toISOString(),
   })
 }
 
@@ -88,13 +92,23 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       template_id,
       consent_data = {},
       signature_data_url,
+      witness_name,
+      witness_signature_data_url,
+      doctor_signature_data_url,
       photo_consent,
       device_ip: bodyIp,
     } = payload
 
-    if (!patient_id || !template_id || !signature_data_url) {
+    if (
+      !patient_id ||
+      !template_id ||
+      !signature_data_url ||
+      !witness_name ||
+      !witness_signature_data_url ||
+      !doctor_signature_data_url
+    ) {
       return NextResponse.json(
-        { error: 'Missing required fields: patient_id, template_id, signature_data_url' },
+        { error: 'Missing required fields: patient_id, template_id, signature_data_url, witness_name, witness_signature_data_url, doctor_signature_data_url' },
         { status: 400 }
       )
     }
@@ -149,34 +163,73 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // Device IP from headers only
     const deviceIp = extractClientIp(req, bodyIp)
 
-    // Convert base64 signature to Buffer
+    // Convert base64 signatures to Buffer
     const base64Data = signature_data_url.replace(/^data:image\/\w+;base64,/, '')
     const signatureBuffer = Buffer.from(base64Data, 'base64')
+    const witnessBase64Data = witness_signature_data_url.replace(/^data:image\/\w+;base64,/, '')
+    const witnessSignatureBuffer = Buffer.from(witnessBase64Data, 'base64')
+    const doctorBase64Data = doctor_signature_data_url.replace(/^data:image\/\w+;base64,/, '')
+    const doctorSignatureBuffer = Buffer.from(doctorBase64Data, 'base64')
 
     if (signatureBuffer.length === 0) {
-      return NextResponse.json({ error: 'Invalid signature image' }, { status: 400 })
+      return NextResponse.json({ error: 'Invalid patient signature image' }, { status: 400 })
     }
 
-    if (signatureBuffer.length > 5 * 1024 * 1024) {
+    if (witnessSignatureBuffer.length === 0) {
+      return NextResponse.json({ error: 'Invalid witness signature image' }, { status: 400 })
+    }
+
+    if (doctorSignatureBuffer.length === 0) {
+      return NextResponse.json({ error: 'Invalid doctor signature image' }, { status: 400 })
+    }
+
+    if (
+      signatureBuffer.length > 5 * 1024 * 1024 ||
+      witnessSignatureBuffer.length > 5 * 1024 * 1024 ||
+      doctorSignatureBuffer.length > 5 * 1024 * 1024
+    ) {
       return NextResponse.json(
         { error: 'Signature image exceeds 5MB limit' },
         { status: 400 }
       )
     }
 
-    // Upload signature
+    // Upload signatures
     const timestamp = Date.now()
     const signaturePath = `signatures/${patient_id}/${timestamp}.png`
-    console.log('[SIGN API] uploading signature', { signaturePath, size: signatureBuffer.length })
-    const { error: uploadError } = await supabase.storage
-      .from('consent-signatures')
-      .upload(signaturePath, signatureBuffer, {
-        contentType: 'image/png',
-        upsert: false,
-      })
+    const witnessSignaturePath = `signatures/${patient_id}/witness_${timestamp}.png`
+    const doctorSignaturePath = `signatures/${patient_id}/doctor_${timestamp}.png`
+    console.log('[SIGN API] uploading signatures', {
+      signaturePath,
+      witnessSignaturePath,
+      doctorSignaturePath,
+      patientSize: signatureBuffer.length,
+      witnessSize: witnessSignatureBuffer.length,
+      doctorSize: doctorSignatureBuffer.length,
+    })
+    const [patientUpload, witnessUpload, doctorUpload] = await Promise.all([
+      supabase.storage
+        .from('consent-signatures')
+        .upload(signaturePath, signatureBuffer, {
+          contentType: 'image/png',
+          upsert: false,
+        }),
+      supabase.storage
+        .from('consent-signatures')
+        .upload(witnessSignaturePath, witnessSignatureBuffer, {
+          contentType: 'image/png',
+          upsert: false,
+        }),
+      supabase.storage
+        .from('consent-signatures')
+        .upload(doctorSignaturePath, doctorSignatureBuffer, {
+          contentType: 'image/png',
+          upsert: false,
+        }),
+    ])
 
-    if (uploadError) {
-      await logError('consent', uploadError, {
+    if (patientUpload.error) {
+      await logError('consent', patientUpload.error, {
         source: 'POST /api/consent/sign',
         patient_id,
         template_id,
@@ -184,43 +237,71 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ error: 'Something went wrong' }, { status: 500 })
     }
 
+    if (witnessUpload.error) {
+      await logError('consent', witnessUpload.error, {
+        source: 'POST /api/consent/sign',
+        patient_id,
+        template_id,
+      })
+      return NextResponse.json({ error: 'Something went wrong' }, { status: 500 })
+    }
+
+    if (doctorUpload.error) {
+      await logError('consent', doctorUpload.error, {
+        source: 'POST /api/consent/sign',
+        patient_id,
+        template_id,
+      })
+      return NextResponse.json({ error: 'Something went wrong' }, { status: 500 })
+    }
+
+    console.log('[SIGN API] signatures uploaded, building insert')
+
     const consentText = buildConsentTextSnapshot(template as ConsentTemplate, consent_data)
     const patientAge = calculateAge(patient.date_of_birth)
     const nowIso = new Date().toISOString()
 
+    const insertPayload = {
+      patient_id,
+      treatment: template.name,
+      consent_text: consentText,
+      template_id,
+      consent_data: consent_data as Record<string, unknown>,
+      signature_image_url: signaturePath,
+      witness_signature_url: witnessSignaturePath,
+      doctor_signature_url: doctorSignaturePath,
+      device_ip: deviceIp,
+      signed_by_ip: deviceIp, // backward compatibility with existing column
+      staff_witness_id: staff?.id ?? user.id,
+      staff_witness_name: witness_name,
+      patient_name: patient.full_name ?? null,
+      patient_age: patientAge,
+      patient_gender: patient.gender ?? null,
+      photo_consent: photo_consent ?? false,
+      signed_at: nowIso,
+      status: 'signed',
+      created_by_staff_id: staff?.id ?? user.id,
+      verified_via_otp: false,
+    }
+
+    console.log('[SIGN API] inserting consent record', { patient_id, template_id })
     const { data: inserted, error: insertError } = await supabase
       .from('patient_consents')
-      .insert({
-        patient_id,
-        treatment: template.name,
-        consent_text: consentText,
-        template_id,
-        consent_data: consent_data as Record<string, unknown>,
-        signature_image_url: signaturePath,
-        device_ip: deviceIp,
-        signed_by_ip: deviceIp, // backward compatibility with existing column
-        staff_witness_id: staff.id,
-        staff_witness_name: staff.full_name,
-        patient_name: patient.full_name,
-        patient_age: patientAge,
-        patient_gender: patient.gender,
-        photo_consent: photo_consent ?? false,
-        signed_at: nowIso,
-        status: 'signed',
-        created_by_staff_id: staff.id,
-        verified_via_otp: false,
-      })
+      .insert(insertPayload)
       .select('id')
       .single()
 
     if (insertError || !inserted) {
-      await logError('consent', insertError ?? new Error('Insert failed'), {
-        source: 'POST /api/consent/sign',
-        patient_id,
-        template_id,
-        signaturePath,
+      console.error('[SIGN API] insert error', insertError)
+      await supabase.from('error_logs').insert({
+        source: 'consent_sign_insert',
+        error_message: insertError?.message ?? 'Insert failed with no error',
+        payload: { patient_id, template_id, signaturePath, witnessSignaturePath, doctorSignaturePath },
       })
-      return NextResponse.json({ error: 'Something went wrong' }, { status: 500 })
+      return NextResponse.json(
+        { error: 'Failed to save consent.' },
+        { status: 500 }
+      )
     }
 
     console.log('[SIGN API] consent inserted', { consentId: inserted.id })

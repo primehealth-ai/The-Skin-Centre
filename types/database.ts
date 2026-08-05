@@ -393,6 +393,8 @@ export interface Database {
           verified_via_otp: boolean
           otp_verified_at: string | null
           signature_image_url: string | null
+          witness_signature_url: string | null
+          doctor_signature_url: string | null
           pdf_url: string | null
           pdf_hash: string | null
           signed_at: string | null
@@ -418,6 +420,8 @@ export interface Database {
           verified_via_otp?: boolean
           otp_verified_at?: string | null
           signature_image_url?: string | null
+          witness_signature_url?: string | null
+          doctor_signature_url?: string | null
           pdf_url?: string | null
           pdf_hash?: string | null
           signed_at?: string | null
@@ -443,6 +447,8 @@ export interface Database {
           verified_via_otp?: boolean
           otp_verified_at?: string | null
           signature_image_url?: string | null
+          witness_signature_url?: string | null
+          doctor_signature_url?: string | null
           pdf_url?: string | null
           pdf_hash?: string | null
           signed_at?: string | null

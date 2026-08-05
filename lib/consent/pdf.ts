@@ -473,6 +473,8 @@ function buildPhotoConsent(template: ConsentTemplate, photoConsent: boolean) {
 
 function buildSignatures(
   signatureDataUrl: string,
+  doctorSignatureDataUrl: string,
+  witnessSignatureDataUrl: string,
   staffWitness: ConsentPDFParams['staffWitness'],
   signedAt: Date
 ) {
@@ -485,7 +487,7 @@ function buildSignatures(
       { style: styles.signatureCol },
       h(
         View,
-        { style: styles.signatureBoxLarge },
+        { style: styles.signatureBox },
         h(Image, { src: signatureDataUrl, style: styles.signatureImage })
       ),
       h(
@@ -503,7 +505,11 @@ function buildSignatures(
     h(
       View,
       { style: styles.signatureCol },
-      h(View, { style: styles.signatureBox }, null),
+      h(
+        View,
+        { style: styles.signatureBox },
+        h(Image, { src: doctorSignatureDataUrl, style: styles.signatureImage })
+      ),
       h(
         Text,
         { style: styles.signatureLabel },
@@ -519,7 +525,11 @@ function buildSignatures(
     h(
       View,
       { style: styles.signatureCol },
-      h(View, { style: styles.signatureBox }, null),
+      h(
+        View,
+        { style: styles.signatureBox },
+        h(Image, { src: witnessSignatureDataUrl, style: styles.signatureImage })
+      ),
       h(
         Text,
         { style: styles.signatureLabel },
@@ -548,7 +558,7 @@ function buildAuditFooter(
 }
 
 function ConsentDocument(params: ConsentPDFParams) {
-  const { template, patient, filledFields, staffWitness, signatureDataUrl, deviceIp, signedAt, photoConsent, logoBase64 } =
+  const { template, patient, filledFields, staffWitness, signatureDataUrl, witnessSignatureDataUrl, doctorSignatureDataUrl, deviceIp, signedAt, photoConsent, logoBase64 } =
     params
 
   return h(
@@ -592,7 +602,7 @@ function ConsentDocument(params: ConsentPDFParams) {
       // Patient declaration
       buildPatientDeclaration(),
       // Signatures
-      buildSignatures(signatureDataUrl, staffWitness, signedAt),
+      buildSignatures(signatureDataUrl, doctorSignatureDataUrl, witnessSignatureDataUrl, staffWitness, signedAt),
       // Audit footer
       buildAuditFooter(signedAt, deviceIp, staffWitness, template),
       // Page footer

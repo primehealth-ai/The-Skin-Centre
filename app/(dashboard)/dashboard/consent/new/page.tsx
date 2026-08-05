@@ -24,6 +24,7 @@ import { Input } from '@/components/ui/Input'
 import { Badge } from '@/components/ui/Badge'
 import { normalizePhone } from '@/lib/utils/phone'
 import { formatPhoneNumber } from '@/lib/utils/formatters'
+import { useAuth } from '@/hooks/useAuth'
 import type { ConsentTemplate, ConsentDynamicField } from '@/lib/consent/types'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -135,7 +136,10 @@ function NewConsentPageInner() {
 
   const supabase = createClient()
   const sigRef = useRef<SignatureCanvas>(null)
+  const doctorCanvasRef = useRef<SignatureCanvas>(null)
+  const witnessCanvasRef = useRef<SignatureCanvas>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const { profile } = useAuth()
 
   const [step, setStep] = useState(1)
   const [patient, setPatient] = useState<Patient | null>(null)
@@ -156,6 +160,16 @@ function NewConsentPageInner() {
   const [generatingPdf, setGeneratingPdf] = useState(false)
   const [hasScrolledToBottom, setHasScrolledToBottom] = useState(false)
   const [sigEmpty, setSigEmpty] = useState(true)
+  const [doctorSigEmpty, setDoctorSigEmpty] = useState(true)
+  const [witnessSigEmpty, setWitnessSigEmpty] = useState(true)
+  const [witnessName, setWitnessName] = useState('')
+
+  // Pre-fill witness name once profile is loaded
+  useEffect(() => {
+    if (profile?.full_name) {
+      setWitnessName(profile.full_name)
+    }
+  }, [profile])
 
   // Load patient from query param
   useEffect(() => {
@@ -300,6 +314,24 @@ function NewConsentPageInner() {
     setSigEmpty(isCanvasEmpty(sigRef))
   }, [])
 
+  const handleClearDoctorSignature = useCallback(() => {
+    doctorCanvasRef.current?.clear()
+    setDoctorSigEmpty(true)
+  }, [])
+
+  const handleDoctorSignatureChange = useCallback(() => {
+    setDoctorSigEmpty(isCanvasEmpty(doctorCanvasRef))
+  }, [])
+
+  const handleClearWitnessSignature = useCallback(() => {
+    witnessCanvasRef.current?.clear()
+    setWitnessSigEmpty(true)
+  }, [])
+
+  const handleWitnessSignatureChange = useCallback(() => {
+    setWitnessSigEmpty(isCanvasEmpty(witnessCanvasRef))
+  }, [])
+
   const handleSubmit = useCallback(async () => {
     if (!patient || !selectedTemplate) return
 
@@ -308,21 +340,48 @@ function NewConsentPageInner() {
     setError(null)
 
     try {
+      const trimmedWitnessName = witnessName.trim()
+      if (!trimmedWitnessName) {
+        setSubmitError('Please provide the staff witness name.')
+        setIsSubmitting(false)
+        return
+      }
       if (isCanvasEmpty(sigRef)) {
-        setSubmitError('Please provide a signature before submitting.')
+        setSubmitError('Please provide the patient signature before submitting.')
+        setIsSubmitting(false)
+        return
+      }
+      if (isCanvasEmpty(doctorCanvasRef)) {
+        setSubmitError('Please provide the doctor signature before submitting.')
+        setIsSubmitting(false)
+        return
+      }
+      if (isCanvasEmpty(witnessCanvasRef)) {
+        setSubmitError('Please provide the staff witness signature before submitting.')
+        setIsSubmitting(false)
         return
       }
 
       let dataUrl: string
+      let doctorDataUrl: string
+      let witnessDataUrl: string
       try {
         dataUrl = sigRef.current?.getCanvas().toDataURL('image/png') ?? ''
+        doctorDataUrl = doctorCanvasRef.current?.getCanvas().toDataURL('image/png') ?? ''
+        witnessDataUrl = witnessCanvasRef.current?.getCanvas().toDataURL('image/png') ?? ''
       } catch (canvasErr) {
         console.error('[SIGN CLIENT] canvas toDataURL error', canvasErr)
         setSubmitError('Could not read signature. Please try again.')
+        setIsSubmitting(false)
         return
       }
-      if (!dataUrl || dataUrl.length < 100) {
+      if (
+        !dataUrl || dataUrl.length < 100 ||
+        !doctorDataUrl || doctorDataUrl.length < 100 ||
+        !witnessDataUrl || witnessDataUrl.length < 100
+      ) {
         setSubmitError('Could not read signature. Please try again.')
+        setIsSubmitting(false)
         return
       }
 
@@ -330,6 +389,8 @@ function NewConsentPageInner() {
         patient_id: patient.id,
         template_id: selectedTemplate.id,
         signatureLength: dataUrl.length,
+        doctorSignatureLength: doctorDataUrl.length,
+        witnessSignatureLength: witnessDataUrl.length,
       })
       const res = await fetch('/api/consent/sign', {
         method: 'POST',
@@ -339,6 +400,9 @@ function NewConsentPageInner() {
           template_id: selectedTemplate.id,
           consent_data: consentData,
           signature_data_url: dataUrl,
+          witness_name: trimmedWitnessName,
+          witness_signature_data_url: witnessDataUrl,
+          doctor_signature_data_url: doctorDataUrl,
           photo_consent: selectedTemplate.has_photo_consent ? photoConsent : false,
           device_ip: '',
         }),
@@ -349,6 +413,7 @@ function NewConsentPageInner() {
       const json = JSON.parse(text) as { consent_id?: string; error?: string }
       if (!res.ok) {
         setSubmitError(json.error || `Submission failed (${res.status}). Please try again.`)
+        setIsSubmitting(false)
         return
       }
       setConsentId(json.consent_id ?? null)
@@ -363,7 +428,7 @@ function NewConsentPageInner() {
     } finally {
       setIsSubmitting(false)
     }
-  }, [patient, selectedTemplate, consentData, photoConsent])
+  }, [patient, selectedTemplate, consentData, photoConsent, witnessName])
 
   const handleGeneratePdf = useCallback(async () => {
     if (!consentId) return
@@ -392,10 +457,15 @@ function NewConsentPageInner() {
     setConsentId(null)
     setHasScrolledToBottom(false)
     setSigEmpty(true)
+    setDoctorSigEmpty(true)
+    setWitnessSigEmpty(true)
+    setWitnessName(profile?.full_name ?? '')
     setError(null)
     setSubmitError(null)
     sigRef.current?.clear()
-  }, [])
+    doctorCanvasRef.current?.clear()
+    witnessCanvasRef.current?.clear()
+  }, [profile])
 
   if (loadingPatient || loadingTemplates) {
     return (
@@ -760,12 +830,83 @@ function NewConsentPageInner() {
                 />
               </div>
 
-              <div className="flex justify-end mb-4">
+              <div className="flex justify-end mb-6">
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={handleClearSignature}
                   disabled={sigEmpty}
+                >
+                  <X className="h-3.5 w-3.5 mr-1" /> Clear
+                </Button>
+              </div>
+
+              <h2 className="text-sm font-extrabold text-slate-800 dark:text-slate-100 mb-1">
+                Dr. Abhinav Kumar — Treating Dermatologist
+              </h2>
+              <p className="text-xs text-slate-500 mb-4">
+                MBBS MD (Dermatology)
+              </p>
+
+              <div className="bg-white border border-gray-300 rounded-lg overflow-hidden mb-4">
+                <SignatureCanvas
+                  ref={doctorCanvasRef}
+                  penColor="black"
+                  onEnd={handleDoctorSignatureChange}
+                  canvasProps={{
+                    className: 'w-full h-[200px] touch-none',
+                  }}
+                  backgroundColor="rgba(255,255,255,1)"
+                />
+              </div>
+
+              <div className="flex justify-end mb-6">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleClearDoctorSignature}
+                  disabled={doctorSigEmpty}
+                >
+                  <X className="h-3.5 w-3.5 mr-1" /> Clear
+                </Button>
+              </div>
+
+              <div className="mb-4">
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-400 uppercase tracking-wider mb-1.5 block">
+                  Staff Witness Name <span className="text-rose-500">*</span>
+                </label>
+                <Input
+                  value={witnessName}
+                  onChange={(e) => setWitnessName(e.target.value)}
+                  placeholder="Enter staff witness name"
+                />
+              </div>
+
+              <h2 className="text-sm font-extrabold text-slate-800 dark:text-slate-100 mb-1">
+                Staff Witness Signature
+              </h2>
+              <p className="text-xs text-slate-500 mb-4">
+                Ask the witnessing staff member to sign in the box below.
+              </p>
+
+              <div className="bg-white border border-gray-300 rounded-lg overflow-hidden mb-4">
+                <SignatureCanvas
+                  ref={witnessCanvasRef}
+                  penColor="black"
+                  onEnd={handleWitnessSignatureChange}
+                  canvasProps={{
+                    className: 'w-full h-[200px] touch-none',
+                  }}
+                  backgroundColor="rgba(255,255,255,1)"
+                />
+              </div>
+
+              <div className="flex justify-end mb-4">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleClearWitnessSignature}
+                  disabled={witnessSigEmpty}
                 >
                   <X className="h-3.5 w-3.5 mr-1" /> Clear
                 </Button>
@@ -785,7 +926,13 @@ function NewConsentPageInner() {
                   variant="success"
                   onClick={handleSubmit}
                   isLoading={isSubmitting}
-                  disabled={isCanvasEmpty(sigRef) || isSubmitting}
+                  disabled={
+                    !witnessName.trim() ||
+                    isCanvasEmpty(sigRef) ||
+                    isCanvasEmpty(doctorCanvasRef) ||
+                    isCanvasEmpty(witnessCanvasRef) ||
+                    isSubmitting
+                  }
                 >
                   <ShieldCheck className="h-4 w-4 mr-1" /> Submit Consent
                 </Button>

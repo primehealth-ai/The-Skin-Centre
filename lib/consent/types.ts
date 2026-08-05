@@ -37,6 +37,8 @@ export type PatientConsent = {
   template_id: string | null
   consent_data: Record<string, string | boolean> | null
   signature_image_url: string | null
+  witness_signature_url: string | null
+  doctor_signature_url: string | null
   pdf_url: string | null
   pdf_hash: string | null
   device_ip: string | null
@@ -78,6 +80,8 @@ export type ConsentPDFParams = {
     full_name: string
   }
   signatureDataUrl: string
+  witnessSignatureDataUrl: string
+  doctorSignatureDataUrl: string
   deviceIp: string
   signedAt: Date
   photoConsent: boolean

@@ -142,17 +142,29 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ error: 'Witness not found' }, { status: 404 })
     }
 
-    const [logoBase64, signatureDataUrl] = await Promise.all([
+    if (!typedConsent.witness_signature_url) {
+      return NextResponse.json({ error: 'Witness signature not found for consent' }, { status: 400 })
+    }
+
+    if (!typedConsent.doctor_signature_url) {
+      return NextResponse.json({ error: 'Doctor signature not found for consent' }, { status: 400 })
+    }
+
+    const [logoBase64, signatureDataUrl, doctorSignatureDataUrl, witnessSignatureDataUrl] = await Promise.all([
       getClinicLogoBase64(),
       fetchSignatureAsBase64(supabase, typedConsent.signature_image_url),
+      fetchSignatureAsBase64(supabase, typedConsent.doctor_signature_url),
+      fetchSignatureAsBase64(supabase, typedConsent.witness_signature_url),
     ])
 
     const { pdfBytes, hash } = await generateConsentPDF({
       template: typedConsent.template,
       patient: typedConsent.patient,
       filledFields: (typedConsent.consent_data as Record<string, string | boolean>) ?? {},
-      staffWitness: { id: witness.id, full_name: witness.full_name || 'Unknown' },
+      staffWitness: { id: witness.id, full_name: typedConsent.staff_witness_name || witness.full_name || 'Unknown' },
       signatureDataUrl,
+      witnessSignatureDataUrl,
+      doctorSignatureDataUrl,
       deviceIp: typedConsent.device_ip || 'unknown',
       signedAt: typedConsent.signed_at ? new Date(typedConsent.signed_at) : new Date(),
       photoConsent: typedConsent.photo_consent,

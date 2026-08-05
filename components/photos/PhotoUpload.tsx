@@ -85,6 +85,9 @@ export function PhotoUpload({ patientId, onSuccess }: PhotoUploadProps) {
       formData.append('bodyArea', bodyArea)
       formData.append('notes', notes.trim())
 
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 35000)
+
       const photoId = await new Promise<string>((resolve, reject) => {
         const xhr = new XMLHttpRequest()
         xhr.open('POST', '/api/photos/upload')
@@ -96,16 +99,37 @@ export function PhotoUpload({ patientId, onSuccess }: PhotoUploadProps) {
         }
 
         xhr.onload = () => {
+          clearTimeout(timeoutId)
           setProgress(100)
-          const data = JSON.parse(xhr.responseText) as { success?: boolean; photoId?: string; error?: string }
-          if (xhr.status >= 200 && xhr.status < 300 && data.photoId) {
-            resolve(data.photoId)
-          } else {
-            reject(new Error(data.error ?? 'Upload failed'))
+          try {
+            const data = JSON.parse(xhr.responseText) as { success?: boolean; photoId?: string; error?: string }
+            if (xhr.status >= 200 && xhr.status < 300 && data.photoId) {
+              resolve(data.photoId)
+            } else {
+              reject(new Error(data.error ?? 'Upload failed'))
+            }
+          } catch {
+            reject(new Error('Unexpected server response. Please try again.'))
           }
         }
 
-        xhr.onerror = () => reject(new Error('Network error during upload'))
+        xhr.onerror = () => {
+          clearTimeout(timeoutId)
+          reject(new Error('Network error during upload'))
+        }
+        xhr.ontimeout = () => {
+          clearTimeout(timeoutId)
+          reject(new Error('Upload timed out. Check your connection and try again.'))
+        }
+        xhr.onabort = () => {
+          clearTimeout(timeoutId)
+          reject(new Error('Upload timed out. Check your connection and try again.'))
+        }
+
+        controller.signal.addEventListener('abort', () => {
+          xhr.abort()
+        })
+
         xhr.send(formData)
       })
 
