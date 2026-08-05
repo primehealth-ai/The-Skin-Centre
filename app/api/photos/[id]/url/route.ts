@@ -10,7 +10,7 @@ interface RouteContext {
 }
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   context: RouteContext
 ): Promise<NextResponse> {
   try {
@@ -55,9 +55,10 @@ export async function GET(
     }
 
     // 3. Generate signed URL (1 hour expiry)
+    const download = req.nextUrl.searchParams.get('download') === 'true'
     const { data: signedData, error: signedError } = await supabase.storage
       .from('patient-photos')
-      .createSignedUrl(photo.photo_url, 3600)
+      .createSignedUrl(photo.photo_url, 3600, download ? { download: true } : undefined)
 
     if (signedError || !signedData?.signedUrl) {
       throw new Error(`Failed to generate signed URL: ${signedError?.message ?? 'Unknown error'}`)
@@ -79,4 +80,3 @@ export async function GET(
     return NextResponse.json({ error: message }, { status: 500 })
   }
 }
-

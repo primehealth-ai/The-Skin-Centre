@@ -13,6 +13,7 @@ import {
   Move,
   ImageOff,
   Camera,
+  Download,
   Loader2,
 } from 'lucide-react'
 import type { Database } from '@/types/database'
@@ -290,18 +291,53 @@ function SinglePhotoView({ photo, missing }: { photo: Photo; missing: 'before' |
   )
 }
 
+function DownloadPhotoButton({
+  photo,
+  isDownloading,
+  compact = false,
+  onDownload,
+}: {
+  photo: Photo
+  isDownloading: boolean
+  compact?: boolean
+  onDownload: (photo: Photo) => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={(event) => {
+        event.stopPropagation()
+        onDownload(photo)
+      }}
+      disabled={isDownloading}
+      className={compact
+        ? 'absolute right-1.5 top-1.5 z-20 flex h-7 w-7 items-center justify-center rounded-full bg-slate-900/75 text-white shadow transition hover:bg-blue-600 disabled:cursor-wait disabled:opacity-70'
+        : 'inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-bold text-blue-600 transition hover:bg-blue-50 disabled:cursor-wait disabled:opacity-60 dark:text-blue-400 dark:hover:bg-blue-950/30'}
+      aria-label={`Download ${photo.photo_type} photo`}
+      title={`Download ${photo.photo_type} photo`}
+    >
+      {isDownloading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+      {!compact && 'Download'}
+    </button>
+  )
+}
+
 // ─── Thumbnail Grid ───────────────────────────────────────────────────────────
 
 function Thumbnail({
   photo,
   isActiveBefore,
   isActiveAfter,
+  isDownloading,
   onSelect,
+  onDownload,
 }: {
   photo: Photo
   isActiveBefore: boolean
   isActiveAfter: boolean
+  isDownloading: boolean
   onSelect: (photo: Photo, slot: 'before' | 'after') => void
+  onDownload: (photo: Photo) => void
 }) {
   const { url } = useSignedUrl(photo)
   const isActive = isActiveBefore || isActiveAfter
@@ -341,6 +377,13 @@ function Thumbnail({
           </button>
         </div>
       </button>
+
+      <DownloadPhotoButton
+        photo={photo}
+        isDownloading={isDownloading}
+        compact
+        onDownload={onDownload}
+      />
 
       {/* Type badge */}
       <div className="absolute left-1.5 top-1.5 z-10 pointer-events-none">
@@ -385,6 +428,7 @@ export function PhotoComparison({ photos, onPhotoDeleted }: PhotoComparisonProps
   const { profile } = useAuth()
   const isStaffOrAdmin = profile?.role === 'staff' || profile?.role === 'admin'
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [downloadingId, setDownloadingId] = useState<string | null>(null)
 
   const handleDeletePhoto = async (photoId: string) => {
     if (!window.confirm('Are you sure you want to delete this photo?')) return
@@ -404,6 +448,28 @@ export function PhotoComparison({ photos, onPhotoDeleted }: PhotoComparisonProps
       setDeletingId(null)
     }
   }
+
+  const handleDownloadPhoto = useCallback(async (photo: Photo) => {
+    setDownloadingId(photo.id)
+    try {
+      const res = await fetch(`/api/photos/${photo.id}/url?download=true`)
+      const data = (await res.json()) as { url?: string; error?: string }
+      if (!res.ok || !data.url) {
+        throw new Error(data.error || 'Failed to prepare photo download')
+      }
+
+      const link = document.createElement('a')
+      link.href = data.url
+      link.download = photo.photo_url.split('/').pop() || `${photo.photo_type}-${photo.id}.jpg`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to download photo')
+    } finally {
+      setDownloadingId(null)
+    }
+  }, [])
 
   const groups = groupByTreatment(photos)
   const [selectedTreatment, setSelectedTreatment] = useState(groups[0]?.treatment ?? '')
@@ -485,6 +551,11 @@ export function PhotoComparison({ photos, onPhotoDeleted }: PhotoComparisonProps
               <div className="flex items-center gap-2 text-xs text-slate-500 bg-slate-50 dark:bg-slate-800/40 px-2.5 py-1 rounded-lg border border-slate-100 dark:border-slate-800">
                 <Calendar className="h-3.5 w-3.5" />
                 <span>Before: <span className="font-semibold text-rose-600 dark:text-rose-400">{formatDate(activeBefore.taken_at)}</span></span>
+                <DownloadPhotoButton
+                  photo={activeBefore}
+                  isDownloading={downloadingId === activeBefore.id}
+                  onDownload={handleDownloadPhoto}
+                />
                 {isStaffOrAdmin && (
                   <button
                     onClick={() => { void handleDeletePhoto(activeBefore.id) }}
@@ -501,6 +572,11 @@ export function PhotoComparison({ photos, onPhotoDeleted }: PhotoComparisonProps
               <div className="flex items-center gap-2 text-xs text-slate-500 bg-slate-50 dark:bg-slate-800/40 px-2.5 py-1 rounded-lg border border-slate-100 dark:border-slate-800">
                 <Calendar className="h-3.5 w-3.5" />
                 <span>After: <span className="font-semibold text-emerald-600 dark:text-emerald-400">{formatDate(activeAfter.taken_at)}</span></span>
+                <DownloadPhotoButton
+                  photo={activeAfter}
+                  isDownloading={downloadingId === activeAfter.id}
+                  onDownload={handleDownloadPhoto}
+                />
                 {isStaffOrAdmin && (
                   <button
                     onClick={() => { void handleDeletePhoto(activeAfter.id) }}
@@ -552,7 +628,7 @@ export function PhotoComparison({ photos, onPhotoDeleted }: PhotoComparisonProps
         {allPhotos.length > 0 && (
           <div className="mt-2">
             <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-500">
-              All Photos — click to set as Before / After
+              All Photos — click to set as Before / After or download
             </p>
             <div className="grid grid-cols-4 gap-3">
               {allPhotos.map((photo) => (
@@ -561,7 +637,9 @@ export function PhotoComparison({ photos, onPhotoDeleted }: PhotoComparisonProps
                   photo={photo}
                   isActiveBefore={photo.id === activeBeforeId}
                   isActiveAfter={photo.id === activeAfterId}
+                  isDownloading={downloadingId === photo.id}
                   onSelect={handleSelect}
+                  onDownload={handleDownloadPhoto}
                 />
               ))}
             </div>
