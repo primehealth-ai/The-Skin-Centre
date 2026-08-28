@@ -1,5 +1,15 @@
-import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
+
+// ---------------------------------------------------------------------------
+// EDGE MIDDLEWARE — must complete in < 1.5 s on Vercel Edge Runtime.
+// NEVER await any Supabase network call here (auth.getUser, getSession, DB
+// queries, storage) — they will cause MIDDLEWARE_INVOCATION_TIMEOUT (504).
+//
+// Auth strategy:
+//   • Middleware: cookie EXISTENCE check only (synchronous, ~0 ms).
+//   • Route handlers / Server Components: full session verification via
+//     createClient() from @/lib/supabase/server.
+// ---------------------------------------------------------------------------
 
 export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname
@@ -27,86 +37,44 @@ export async function middleware(request: NextRequest) {
   }
 
   // ── Public API routes that require no auth ───────────────────────────────────
-  const isPublicApi = pathname === '/api/whatsapp/webhook'
-  if (isPublicApi) {
+  if (pathname === '/api/whatsapp/webhook') {
     return NextResponse.next({ request })
   }
 
-  // ── All other routes require Supabase auth ───────────────────────────────────
-  // Critical fix (Item 15): env vars are REQUIRED — fail closed with 500 rather
-  // than silently falling through to unauthenticated access.
-  const supabaseUrl  = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const supabaseAnon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-
-  if (!supabaseUrl || !supabaseAnon) {
-    console.error(
-      'CRITICAL: NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY is not set. ' +
-      'Refusing all requests to prevent unauthenticated access.'
-    )
-    return NextResponse.json(
-      { error: 'Server misconfiguration: authentication service unavailable' },
-      { status: 500 }
-    )
+  // ── Login page is always public ──────────────────────────────────────────────
+  if (pathname.startsWith('/login')) {
+    return NextResponse.next({ request })
   }
 
-  let supabaseResponse = NextResponse.next({ request })
-  let user = null
+  // ── Lightweight cookie existence check (synchronous, no network) ─────────────
+  // Supabase stores the session token in one of two cookie names depending on
+  // the project ref extracted from the Supabase URL.
+  // We check both the short-form and the project-ref-scoped name.
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''
+  const projectRef = supabaseUrl.split('//')[1]?.split('.')[0] ?? ''
 
-  try {
-    const supabase = createServerClient(supabaseUrl, supabaseAnon, {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll()
-        },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))
-          supabaseResponse = NextResponse.next({ request })
-          cookiesToSet.forEach(({ name, value, options }) =>
-            supabaseResponse.cookies.set(name, value, options)
-          )
-        },
-      },
-    })
+  const token =
+    request.cookies.get('sb-access-token') ??
+    request.cookies.get(`sb-${projectRef}-auth-token`) ??
+    // Supabase v2 SSR stores a chunked token; accept any chunk as proof
+    [...request.cookies.getAll()].find((c) =>
+      c.name.startsWith(`sb-${projectRef}-auth-token`)
+    )
 
-    const {
-      data: { user: authUser },
-    } = await supabase.auth.getUser()
-    user = authUser
-  } catch (err) {
-    // Auth check threw — treat as unauthenticated (network issue etc.)
-    console.error('Middleware Supabase auth error:', err)
-  }
-
-  const isPublicPage = pathname.startsWith('/login')
-
+  // ── Protect all API routes ───────────────────────────────────────────────────
   if (pathname.startsWith('/api/')) {
-    if (!user) {
-      const errorResponse = NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-      supabaseResponse.cookies.getAll().forEach((cookie) => {
-        errorResponse.cookies.set(cookie)
-      })
-      return errorResponse
+    if (!token) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
-    return supabaseResponse
+    return NextResponse.next({ request })
   }
 
-  if (!user && !isPublicPage) {
-    const redirectResponse = NextResponse.redirect(new URL('/login', request.url))
-    supabaseResponse.cookies.getAll().forEach((cookie) => {
-      redirectResponse.cookies.set(cookie)
-    })
-    return redirectResponse
+  // ── Protect all dashboard / page routes ─────────────────────────────────────
+  if (!token) {
+    return NextResponse.redirect(new URL('/login', request.url))
   }
 
-  if (user && isPublicPage) {
-    const redirectResponse = NextResponse.redirect(new URL('/dashboard', request.url))
-    supabaseResponse.cookies.getAll().forEach((cookie) => {
-      redirectResponse.cookies.set(cookie)
-    })
-    return redirectResponse
-  }
-
-  return supabaseResponse
+  return NextResponse.next({ request })
 }
 
 export const config = {
