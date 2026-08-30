@@ -18,18 +18,30 @@ import {
   CalendarDays,
   SlidersHorizontal,
   Wifi,
+  ChevronLeft,
+  ChevronRight,
+  Calendar,
 } from 'lucide-react'
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const PAGE_SIZE = 50
+
+// IST offset in ms: +05:30
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type Call = CallWithPatient
 
-type DateRangeKey = 'today' | 'week' | 'month' | 'all'
+type PresetKey = 'today' | 'yesterday' | 'last7' | 'last30' | 'all'
 type ServiceKey = 'all' | 'hair-care' | 'skin-care' | 'general'
 type StatusKey = 'all' | 'answered' | 'missed' | 'no-answer' | 'busy' | 'failed'
 
 interface FilterState {
-  dateRange: DateRangeKey
+  preset: PresetKey
+  dateFrom: string | null   // 'YYYY-MM-DD' (local, IST)
+  dateTo: string | null     // 'YYYY-MM-DD' (local, IST)
   service: ServiceKey
   status: StatusKey
   search: string
@@ -37,93 +49,45 @@ interface FilterState {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function getDateRangeStart(range: DateRangeKey): Date | null {
+/** Returns today's YYYY-MM-DD in IST */
+function todayIST(): string {
   const now = new Date()
-  switch (range) {
-    case 'today': {
-      const d = new Date(now)
-      d.setHours(0, 0, 0, 0)
-      return d
+  const ist = new Date(now.getTime() + IST_OFFSET_MS)
+  return ist.toISOString().slice(0, 10)
+}
+
+/** Subtracts `days` from today's IST date */
+function daysAgoIST(days: number): string {
+  const now = new Date()
+  const ist = new Date(now.getTime() + IST_OFFSET_MS - days * 86400000)
+  return ist.toISOString().slice(0, 10)
+}
+
+/** Given a preset, returns { dateFrom, dateTo } or nulls for 'all' */
+function presetToDates(preset: PresetKey): { dateFrom: string | null; dateTo: string | null } {
+  const today = todayIST()
+  switch (preset) {
+    case 'today':
+      return { dateFrom: today, dateTo: today }
+    case 'yesterday': {
+      const y = daysAgoIST(1)
+      return { dateFrom: y, dateTo: y }
     }
-    case 'week': {
-      const d = new Date(now)
-      d.setDate(d.getDate() - 6)
-      d.setHours(0, 0, 0, 0)
-      return d
-    }
-    case 'month': {
-      const d = new Date(now)
-      d.setDate(1)
-      d.setHours(0, 0, 0, 0)
-      return d
-    }
+    case 'last7':
+      return { dateFrom: daysAgoIST(6), dateTo: today }
+    case 'last30':
+      return { dateFrom: daysAgoIST(29), dateTo: today }
     case 'all':
     default:
-      return null
+      return { dateFrom: null, dateTo: null }
   }
 }
 
-function normaliseService(serviceType: string | null | undefined): ServiceKey {
-  if (!serviceType) return 'general'
-  const s = serviceType.toLowerCase()
-  if (s.includes('hair')) return 'hair-care'
-  if (s.includes('skin')) return 'skin-care'
-  return 'general'
-}
-
-function applyFilters(calls: Call[], filters: FilterState): Call[] {
-  const rangeStart = getDateRangeStart(filters.dateRange)
-  const searchLower = filters.search.toLowerCase().trim()
-
-  return calls.filter((call) => {
-    // Date range
-    if (rangeStart && call.call_started_at) {
-      const callDate = new Date(call.call_started_at)
-      if (callDate < rangeStart) return false
-    }
-
-    // Service
-    if (filters.service !== 'all') {
-      if (normaliseService(call.service_type) !== filters.service) return false
-    }
-
-    // Status
-    if (filters.status !== 'all') {
-      const statusMap: Record<StatusKey, string> = {
-        all: '',
-        answered: 'answered',
-        missed: 'missed',
-        'no-answer': 'no-answer',
-        busy: 'busy',
-        failed: 'failed',
-      }
-      if (call.call_status !== statusMap[filters.status]) return false
-    }
-
-    // Search
-    if (searchLower) {
-      const phoneMatch = call.patient_phone?.includes(searchLower)
-      const nameMatch = call.patients?.full_name?.toLowerCase().includes(searchLower)
-      const serviceMatch = call.service_type?.toLowerCase().includes(searchLower)
-      if (!phoneMatch && !nameMatch && !serviceMatch) return false
-    }
-
-    return true
-  })
-}
-
 function computeTodayStats(calls: Call[]) {
-  const start = getDateRangeStart('today')!
-  const todayCalls = calls.filter((c) => {
-    if (!c.call_started_at) return false
-    return new Date(c.call_started_at) >= start
-  })
-
-  const total = todayCalls.length
-  const answered = todayCalls.filter((c) => c.call_status === 'answered').length
-  const missed = todayCalls.filter((c) => c.call_status === 'missed').length
-  const recoveryRate = missed > 0 ? Math.round(((total - missed) / total) * 100) : 100
-
+  const total = calls.length
+  const answered = calls.filter((c) => c.call_status === 'answered').length
+  const missed = calls.filter((c) => c.call_status === 'missed').length
+  const recoveryRate = total > 0 ? Math.round((answered / total) * 100) : 100
   return { total, answered, missed, recoveryRate }
 }
 
@@ -151,7 +115,7 @@ function exportToCSV(calls: Call[]) {
     c.call_status ?? '',
     String(c.call_duration ?? 0),
     c.staff_name ?? '',
-    c.call_started_at ? new Date(c.call_started_at).toLocaleString() : '',
+    c.call_started_at ? new Date(c.call_started_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) : '',
   ])
 
   const csvContent = [headers, ...rows]
@@ -220,17 +184,19 @@ function SkeletonRow() {
 interface FilterBarProps {
   filters: FilterState
   onChange: (next: FilterState) => void
-  resultCount: number
+  page: number
   totalCount: number
   onExport: () => void
   onRefresh: () => void
   isRefreshing: boolean
+  isLoading: boolean
 }
 
-const DATE_RANGE_OPTIONS: { label: string; value: DateRangeKey }[] = [
+const PRESET_OPTIONS: { label: string; value: PresetKey }[] = [
   { label: 'Today', value: 'today' },
-  { label: 'This Week', value: 'week' },
-  { label: 'This Month', value: 'month' },
+  { label: 'Yesterday', value: 'yesterday' },
+  { label: 'Last 7 Days', value: 'last7' },
+  { label: 'Last 30 Days', value: 'last30' },
   { label: 'All Time', value: 'all' },
 ]
 
@@ -253,31 +219,54 @@ const SERVICE_OPTIONS: { label: string; value: ServiceKey }[] = [
 function FilterBar({
   filters,
   onChange,
-  resultCount,
+  page,
   totalCount,
   onExport,
   onRefresh,
   isRefreshing,
+  isLoading,
 }: FilterBarProps) {
+  // Local draft state for custom date range (only committed on [Apply])
+  const [draftFrom, setDraftFrom] = useState(filters.dateFrom ?? '')
+  const [draftTo, setDraftTo] = useState(filters.dateTo ?? '')
+
   const set = <K extends keyof FilterState>(key: K, value: FilterState[K]) =>
     onChange({ ...filters, [key]: value })
+
+  function selectPreset(preset: PresetKey) {
+    const { dateFrom, dateTo } = presetToDates(preset)
+    setDraftFrom(dateFrom ?? '')
+    setDraftTo(dateTo ?? '')
+    onChange({ ...filters, preset, dateFrom, dateTo })
+  }
+
+  function applyCustomRange() {
+    if (!draftFrom && !draftTo) return
+    onChange({ ...filters, preset: 'all', dateFrom: draftFrom || null, dateTo: draftTo || null })
+  }
 
   const selectClass =
     'bg-white dark:bg-slate-950 text-xs border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500/20 font-semibold cursor-pointer'
 
+  const from = page * PAGE_SIZE + 1
+  const to = Math.min((page + 1) * PAGE_SIZE, totalCount)
+  const countLabel = totalCount === 0
+    ? '0 calls'
+    : `${from}–${to} of ${totalCount.toLocaleString()} calls`
+
   return (
     <div className="flex flex-col gap-3 p-4 bg-slate-50/80 dark:bg-slate-900/60 border border-slate-200/60 dark:border-slate-800 rounded-xl">
-      {/* Row 1 — Date range tabs + action buttons */}
+      {/* Row 1 — Preset pills + action buttons */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-        {/* Date range pills */}
-        <div className="flex items-center gap-1 p-1 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl">
+        {/* Preset pills */}
+        <div className="flex items-center gap-1 p-1 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl flex-wrap">
           <CalendarDays className="h-3.5 w-3.5 text-slate-400 ml-2 mr-1 shrink-0" />
-          {DATE_RANGE_OPTIONS.map((opt) => (
+          {PRESET_OPTIONS.map((opt) => (
             <button
               key={opt.value}
-              onClick={() => set('dateRange', opt.value)}
+              onClick={() => selectPreset(opt.value)}
               className={`px-3 py-1.5 text-[11px] font-extrabold rounded-lg transition-all duration-200 active:scale-[0.97] ${
-                filters.dateRange === opt.value
+                filters.preset === opt.value && !( filters.preset === 'all' && (filters.dateFrom || filters.dateTo) && !PRESET_OPTIONS.find(p => p.value === filters.preset))
                   ? 'bg-blue-600 text-white shadow-sm shadow-blue-500/30'
                   : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
               }`}
@@ -287,10 +276,10 @@ function FilterBar({
           ))}
         </div>
 
-        {/* Right-side actions */}
+        {/* Count + actions */}
         <div className="flex items-center gap-2 shrink-0">
-          <span className="text-[10px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
-            {resultCount} / {totalCount} calls
+          <span className="text-[10px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-wider whitespace-nowrap">
+            {isLoading ? '…' : countLabel}
           </span>
           <button
             onClick={onRefresh}
@@ -302,7 +291,7 @@ function FilterBar({
           </button>
           <button
             onClick={onExport}
-            disabled={resultCount === 0}
+            disabled={totalCount === 0 || isLoading}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-extrabold text-white bg-gradient-to-r from-blue-600 to-blue-500 border border-blue-500 rounded-lg hover:brightness-105 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98] shadow-sm shadow-blue-500/20"
           >
             <Download className="h-3 w-3" />
@@ -311,8 +300,37 @@ function FilterBar({
         </div>
       </div>
 
-      {/* Row 2 — Search + Service + Status dropdowns */}
+      {/* Row 2 — Custom date range picker */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+        <div className="flex items-center gap-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-1.5">
+          <Calendar className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+          <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider whitespace-nowrap">From</span>
+          <input
+            type="date"
+            value={draftFrom}
+            onChange={(e) => {
+              setDraftFrom(e.target.value)
+            }}
+            className="bg-transparent text-xs font-semibold text-slate-700 dark:text-slate-300 focus:outline-none cursor-pointer"
+          />
+          <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider whitespace-nowrap">To</span>
+          <input
+            type="date"
+            value={draftTo}
+            onChange={(e) => {
+              setDraftTo(e.target.value)
+            }}
+            className="bg-transparent text-xs font-semibold text-slate-700 dark:text-slate-300 focus:outline-none cursor-pointer"
+          />
+          <button
+            onClick={applyCustomRange}
+            disabled={!draftFrom && !draftTo}
+            className="ml-1 px-3 py-1 text-[10px] font-extrabold text-white bg-blue-600 rounded-md hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors active:scale-[0.97]"
+          >
+            Apply
+          </button>
+        </div>
+
         {/* Search */}
         <div className="relative flex-1 min-w-0">
           <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-slate-400 pointer-events-none" />
@@ -325,7 +343,7 @@ function FilterBar({
           />
         </div>
 
-        {/* Service filter */}
+        {/* Service + Status */}
         <div className="flex items-center gap-2 shrink-0">
           <SlidersHorizontal className="h-3.5 w-3.5 text-slate-400" />
           <select
@@ -339,10 +357,6 @@ function FilterBar({
               </option>
             ))}
           </select>
-        </div>
-
-        {/* Status filter */}
-        <div className="shrink-0">
           <select
             value={filters.status}
             onChange={(e) => set('status', e.target.value as StatusKey)}
@@ -360,6 +374,76 @@ function FilterBar({
   )
 }
 
+// ─── Pagination Bar ───────────────────────────────────────────────────────────
+
+interface PaginationBarProps {
+  page: number
+  totalCount: number
+  onPage: (p: number) => void
+  isLoading: boolean
+}
+
+function PaginationBar({ page, totalCount, onPage, isLoading }: PaginationBarProps) {
+  const totalPages = Math.ceil(totalCount / PAGE_SIZE)
+  if (totalPages <= 1) return null
+
+  const from = page * PAGE_SIZE + 1
+  const to = Math.min((page + 1) * PAGE_SIZE, totalCount)
+
+  return (
+    <div className="flex items-center justify-between border-t border-slate-100 dark:border-slate-800 px-6 py-4 bg-slate-50/50 dark:bg-slate-900/40">
+      <span className="text-[10px] text-slate-400 dark:text-slate-500 font-extrabold uppercase">
+        Showing {from}–{to} of {totalCount.toLocaleString()} calls · Page {page + 1} of {totalPages}
+      </span>
+      <div className="flex items-center gap-1">
+        <button
+          onClick={() => onPage(page - 1)}
+          disabled={page === 0 || isLoading}
+          className="inline-flex items-center gap-1 px-3 py-1.5 text-[11px] font-bold text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-950 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition-all active:scale-[0.98]"
+        >
+          <ChevronLeft className="h-3.5 w-3.5" />
+          Prev
+        </button>
+        {/* Page number pills — show up to 5 around current */}
+        {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => {
+          let p: number
+          if (totalPages <= 7) {
+            p = i
+          } else if (page < 4) {
+            p = i
+          } else if (page > totalPages - 5) {
+            p = totalPages - 7 + i
+          } else {
+            p = page - 3 + i
+          }
+          return (
+            <button
+              key={p}
+              onClick={() => onPage(p)}
+              disabled={isLoading}
+              className={`w-8 h-7 text-[11px] font-bold rounded-lg transition-all active:scale-[0.97] ${
+                p === page
+                  ? 'bg-blue-600 text-white shadow-sm shadow-blue-500/30'
+                  : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700'
+              }`}
+            >
+              {p + 1}
+            </button>
+          )
+        })}
+        <button
+          onClick={() => onPage(page + 1)}
+          disabled={page >= totalPages - 1 || isLoading}
+          className="inline-flex items-center gap-1 px-3 py-1.5 text-[11px] font-bold text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-950 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition-all active:scale-[0.98]"
+        >
+          Next
+          <ChevronRight className="h-3.5 w-3.5" />
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function CallsPage() {
@@ -367,38 +451,96 @@ export default function CallsPage() {
   const supabase = supabaseRef.current
 
   const [calls, setCalls] = useState<Call[]>([])
+  const [totalCount, setTotalCount] = useState(0)
+  const [todayStats, setTodayStats] = useState({ total: 0, answered: 0, missed: 0, recoveryRate: 100 })
   const [loading, setLoading] = useState(true)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isRealtime, setIsRealtime] = useState(false)
 
   const [selectedCall, setSelectedCall] = useState<Call | null>(null)
+  const [page, setPage] = useState(0)
 
   const [filters, setFilters] = useState<FilterState>({
-    dateRange: 'today',
+    preset: 'today',
+    dateFrom: todayIST(),
+    dateTo: todayIST(),
     service: 'all',
     status: 'all',
     search: '',
   })
 
-  // ── Fetch ────────────────────────────────────────────────────────────────
+  // ── Build query (shared for data + count) ────────────────────────────────
+  // We accept `any` here because Supabase's chained query builder types are
+  // not composable in a generic helper — each chain call returns a different
+  // generic instantiation. Using `any` is the accepted pattern for this.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function applyCallFilters(q: any): any {
+    // Date range — applied server-side (IST +05:30)
+    if (filters.dateFrom) {
+      q = q.gte('call_started_at', `${filters.dateFrom}T00:00:00+05:30`)
+    }
+    if (filters.dateTo) {
+      q = q.lte('call_started_at', `${filters.dateTo}T23:59:59+05:30`)
+    }
+
+    // Service
+    if (filters.service !== 'all') {
+      const serviceMap: Record<string, string> = {
+        'hair-care': 'Hair Care',
+        'skin-care': 'Skin Care',
+        general: 'General',
+      }
+      q = q.ilike('service_type', `%${serviceMap[filters.service]}%`)
+    }
+
+    // Status
+    if (filters.status !== 'all') {
+      q = q.eq('call_status', filters.status)
+    }
+
+    // Search by patient_phone
+    if (filters.search.trim()) {
+      q = q.ilike('patient_phone', `%${filters.search.trim()}%`)
+    }
+
+    return q
+  }
+
+  // ── Fetch page of calls ──────────────────────────────────────────────────
 
   const fetchCalls = useCallback(
-    async (showRefreshSpinner = false) => {
+    async (targetPage: number, showRefreshSpinner = false) => {
       try {
         if (showRefreshSpinner) setIsRefreshing(true)
         else setLoading(true)
-
         setError(null)
 
-        const { data, error: fetchErr } = await supabase
-          .from('calls')
-          .select('*, patients(full_name)')
-          .order('call_started_at', { ascending: false })
-          .limit(500)
+        const rangeFrom = targetPage * PAGE_SIZE
+        const rangeTo = (targetPage + 1) * PAGE_SIZE - 1
 
-        if (fetchErr) throw fetchErr
-        setCalls(data ?? [])
+        // Data query — server-side filtered + paginated
+        const dataQuery = applyCallFilters(
+          supabase.from('calls').select('*, patients(full_name)')
+        )
+          .order('call_started_at', { ascending: false })
+          .range(rangeFrom, rangeTo)
+
+        // Count query — exact total matching same filters
+        const countQuery = applyCallFilters(
+          supabase.from('calls').select('*', { count: 'exact', head: true })
+        )
+
+        const [{ data, error: dataErr }, { count, error: countErr }] = await Promise.all([
+          dataQuery,
+          countQuery,
+        ])
+
+        if (dataErr) throw dataErr
+        if (countErr) throw countErr
+
+        setCalls((data as Call[]) ?? [])
+        setTotalCount(count ?? 0)
       } catch (err: unknown) {
         console.error('[CallsPage] fetch error:', err)
         setError(err instanceof Error ? err.message : 'Failed to retrieve call logs')
@@ -407,28 +549,57 @@ export default function CallsPage() {
         setIsRefreshing(false)
       }
     },
-    [supabase]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [supabase, filters]
   )
+
+  // ── Fetch today's stats (always fixed window, no filter influence) ────────
+
+  const fetchTodayStats = useCallback(async () => {
+    try {
+      const today = todayIST()
+      const { data } = await supabase
+        .from('calls')
+        .select('call_status')
+        .gte('call_started_at', `${today}T00:00:00+05:30`)
+        .lte('call_started_at', `${today}T23:59:59+05:30`)
+
+      if (data) setTodayStats(computeTodayStats(data as Call[]))
+    } catch {
+      // non-critical, silently ignore
+    }
+  }, [supabase])
+
+  // ── Effect: re-fetch when filters change (reset page to 0) ───────────────
+
+  useEffect(() => {
+    setPage(0)
+    fetchCalls(0)
+    fetchTodayStats()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters])
+
+  // ── Effect: fetch when page changes (filters stay the same) ─────────────
+
+  useEffect(() => {
+    // Don't double-fire on initial mount (filters effect handles page=0)
+    if (page === 0) return
+    fetchCalls(page)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page])
 
   // ── Realtime ─────────────────────────────────────────────────────────────
 
   useEffect(() => {
-    fetchCalls()
-
     const channel = supabase
-      .channel('calls_page_changes')
+      .channel('calls_page_realtime')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'calls' },
-        (payload: RealtimePostgresChangesPayload<Call>) => {
-          if (payload.eventType === 'DELETE') {
-            setCalls((prev) => prev.filter((c) => c.id !== (payload.old as { id: string }).id))
-          } else {
-            // Realtime payloads don't carry embedded relations, so payload.new
-            // has no patients.full_name. Refetch (silent) so the join stays
-            // populated for inserted/updated rows.
-            fetchCalls(true)
-          }
+        (_payload: RealtimePostgresChangesPayload<Call>) => {
+          // Silent refresh on any DB change — keeps count + data in sync
+          fetchCalls(page, true)
+          fetchTodayStats()
         }
       )
       .subscribe((status: string) => {
@@ -438,12 +609,21 @@ export default function CallsPage() {
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [supabase, fetchCalls])
+  }, [supabase, fetchCalls, fetchTodayStats, page])
 
-  // ── Derived data ─────────────────────────────────────────────────────────
+  // ── Page change handler ───────────────────────────────────────────────────
 
-  const filteredCalls = applyFilters(calls, filters)
-  const todayStats = computeTodayStats(calls)
+  function handlePage(p: number) {
+    setPage(p)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  // ── Filter change handler — always resets page ───────────────────────────
+
+  function handleFilterChange(next: FilterState) {
+    setPage(0)
+    setFilters(next)
+  }
 
   // ── Render ───────────────────────────────────────────────────────────────
 
@@ -484,25 +664,25 @@ export default function CallsPage() {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <StatPill
           label="Today's Total"
-          value={loading ? '—' : todayStats.total}
+          value={loading && page === 0 ? '—' : todayStats.total}
           icon={<Phone className="h-5 w-5" />}
           accent="blue"
         />
         <StatPill
           label="Answered"
-          value={loading ? '—' : todayStats.answered}
+          value={loading && page === 0 ? '—' : todayStats.answered}
           icon={<PhoneCall className="h-5 w-5" />}
           accent="emerald"
         />
         <StatPill
           label="Missed"
-          value={loading ? '—' : todayStats.missed}
+          value={loading && page === 0 ? '—' : todayStats.missed}
           icon={<PhoneMissed className="h-5 w-5" />}
           accent="rose"
         />
         <StatPill
           label="Recovery Rate"
-          value={loading ? '—' : `${todayStats.recoveryRate}%`}
+          value={loading && page === 0 ? '—' : `${todayStats.recoveryRate}%`}
           icon={<TrendingUp className="h-5 w-5" />}
           accent="amber"
         />
@@ -524,12 +704,13 @@ export default function CallsPage() {
         <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800">
           <FilterBar
             filters={filters}
-            onChange={setFilters}
-            resultCount={filteredCalls.length}
-            totalCount={calls.length}
-            onExport={() => exportToCSV(filteredCalls)}
-            onRefresh={() => fetchCalls(true)}
+            onChange={handleFilterChange}
+            page={page}
+            totalCount={totalCount}
+            onExport={() => exportToCSV(calls)}
+            onRefresh={() => { setPage(0); fetchCalls(0, true); fetchTodayStats() }}
             isRefreshing={isRefreshing}
+            isLoading={loading}
           />
         </div>
 
@@ -552,7 +733,7 @@ export default function CallsPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
-                    {Array.from({ length: 6 }).map((_, i) => (
+                    {Array.from({ length: 8 }).map((_, i) => (
                       <SkeletonRow key={i} />
                     ))}
                   </tbody>
@@ -560,14 +741,14 @@ export default function CallsPage() {
               </div>
             </div>
           ) : !error && calls.length === 0 ? (
-            /* Loaded, no error, nothing returned — explicit recovery path */
+            /* Loaded, no error, nothing returned */
             <div className="flex flex-col items-center justify-center gap-4 py-16 text-center">
               <Phone className="h-8 w-8 text-slate-300 dark:text-slate-600" />
               <p className="text-sm font-bold text-slate-500 dark:text-slate-400">
-                No calls found.
+                No calls found for the selected filters.
               </p>
               <button
-                onClick={() => fetchCalls(true)}
+                onClick={() => { setPage(0); fetchCalls(0, true) }}
                 className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white text-xs font-extrabold transition-all"
               >
                 <RefreshCw className="h-3.5 w-3.5" />
@@ -575,9 +756,19 @@ export default function CallsPage() {
               </button>
             </div>
           ) : (
-            <CallsTable calls={filteredCalls} onViewDetails={setSelectedCall} />
+            <CallsTable calls={calls} onViewDetails={setSelectedCall} />
           )}
         </div>
+
+        {/* Pagination */}
+        {!loading && !error && (
+          <PaginationBar
+            page={page}
+            totalCount={totalCount}
+            onPage={handlePage}
+            isLoading={loading || isRefreshing}
+          />
+        )}
       </div>
 
       {/* Call detail modal */}

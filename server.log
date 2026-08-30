@@ -1,0 +1,23 @@
+
+> primehealth@0.1.0 start
+> next start
+
+  ▲ Next.js 14.2.35
+  - Local:        http://localhost:3000
+
+ ✓ Starting...
+ ✓ Ready in 2.2s
+[SIGN API] handler invoked
+[SIGN API] client created
+[SIGN API] auth checked {
+  userId: 'c015f80b-4300-43fd-b993-1862a43f89f0',
+  authError: undefined
+}
+[SIGN API] service client created
+[SIGN API] uploading signatures {
+  signaturePath: 'signatures/ef4c1a2e-471e-4c44-b5dd-89aff6c465c7/1785905941364.png',
+  witnessSignaturePath: 'signatures/ef4c1a2e-471e-4c44-b5dd-89aff6c465c7/witness_1785905941364.png',
+  patientSize: 21271,
+  witnessSize: 30449
+}
+^C
