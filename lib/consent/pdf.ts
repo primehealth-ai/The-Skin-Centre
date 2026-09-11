@@ -181,6 +181,17 @@ const styles = StyleSheet.create({
     textAlign: 'justify',
     lineHeight: 1.4,
   },
+  legalNotice: {
+    backgroundColor: '#FEF3C7',
+    borderLeftWidth: 3,
+    borderLeftColor: '#D97706',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    fontSize: 9,
+    fontStyle: 'italic',
+    color: '#92400E',
+    marginBottom: 12,
+  },
   signaturesRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -480,7 +491,19 @@ function buildSignatures(
 ) {
   return h(
     View,
-    { style: styles.signaturesRow },
+    null,
+    h(
+      View,
+      { style: styles.legalNotice },
+      h(
+        Text,
+        null,
+        'I understand that my electronic signature has the same legal effect as a handwritten signature under IT Act 2000, Section 5.'
+      )
+    ),
+    h(
+      View,
+      { style: styles.signaturesRow },
     // Patient signature
     h(
       View,
@@ -535,6 +558,7 @@ function buildSignatures(
         { style: styles.signatureLabel },
         `Staff Witness — ${staffWitness.full_name || 'N/A'}`
       )
+    )
     )
   )
 }

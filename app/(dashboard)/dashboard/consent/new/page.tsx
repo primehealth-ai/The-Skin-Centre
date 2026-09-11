@@ -818,6 +818,12 @@ function NewConsentPageInner() {
                 stylus.
               </p>
 
+              {/* IT Act 2000 Legal Notice — permanent, non-dismissable */}
+              <div className="bg-amber-50 border-l-4 border-amber-500 text-amber-900 text-sm italic px-4 py-3 rounded mb-4">
+                I understand that my electronic signature has the same legal effect as a handwritten
+                signature under IT Act 2000, Section 5.
+              </div>
+
               <div className="bg-white border border-gray-300 rounded-lg overflow-hidden mb-4">
                 <SignatureCanvas
                   ref={sigRef}
