@@ -3,6 +3,28 @@ import { logError } from '@/lib/utils/logError'
 
 export const maxDuration = 60;
 
+const decodePhone = (raw: string | undefined): string => {
+  if (!raw) return ''
+  try {
+    return decodeURIComponent(raw).replace(/^\+/, '')
+  } catch {
+    return raw.replace(/^\+/, '').replace(/^%2b/i, '')
+  }
+}
+
+function sanitizePayload(body: unknown): unknown {
+  if (Array.isArray(body)) return body.map(sanitizePayload)
+  if (body && typeof body === 'object') {
+    const payload = body as Record<string, unknown>
+    const out = { ...payload }
+    if (typeof out.caller_number === 'string') out.caller_number = decodePhone(out.caller_number)
+    if (typeof out.called_number === 'string') out.called_number = decodePhone(out.called_number)
+    if (typeof out.agent_number  === 'string') out.agent_number  = decodePhone(out.agent_number)
+    return out
+  }
+  return body
+}
+
 export async function POST(req: Request) {
   let body: unknown = null
 
@@ -15,8 +37,9 @@ export async function POST(req: Request) {
 
   try {
     const supabase = createServiceClient()
-    const insertPayload = Array.isArray(body)
-      ? body.map((item) => ({
+    const sanitized = sanitizePayload(body)
+    const insertPayload = Array.isArray(sanitized)
+      ? sanitized.map((item) => ({
           source: 'knowlarity',
           payload: item,
           status: 'pending',
@@ -24,7 +47,7 @@ export async function POST(req: Request) {
         }))
       : {
           source: 'knowlarity',
-          payload: body,
+          payload: sanitized,
           status: 'pending',
           attempts: 0,
         }

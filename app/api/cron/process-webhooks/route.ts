@@ -15,12 +15,24 @@ export async function POST() {
 async function processWebhooks() {
   const supabase = createServiceClient() as any
 
-  // Claim up to 15 pending jobs atomically using SKIP LOCKED RPC
-  const { data: jobs, error } = await supabase.rpc('claim_webhook_jobs', { limit_count: 15 })
+  // Claim up to 5 pending jobs atomically using SKIP LOCKED RPC
+  const { data: jobs, error } = await supabase.rpc('claim_webhook_jobs', { limit_count: 5 })
 
   if (error) {
-    await logError('cron', error)
-    return new Response(JSON.stringify({ processed: 0, error: error.message }), { status: 500 })
+    const isTransient =
+      error.message?.includes('Gateway Timeout') ||
+      error.message?.includes('timeout') ||
+      error.message?.includes('503') ||
+      error.message?.includes('504')
+    if (!isTransient) {
+      await logError('cron', error)
+    } else {
+      console.warn('[cron] Transient:', error.message)
+    }
+    return new Response(
+      JSON.stringify({ processed: 0 }),
+      { status: 200 }
+    )
   }
 
   const queue = jobs ?? []
