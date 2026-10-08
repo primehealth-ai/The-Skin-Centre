@@ -17,18 +17,18 @@ interface CallsTableProps {
 export function CallsTable({ calls, onViewDetails }: CallsTableProps) {
   return (
     <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden shadow-sm bg-white dark:bg-slate-900">
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto w-full">
         <table className="w-full border-collapse text-left text-xs">
           <thead className="bg-slate-50 dark:bg-slate-800/40 text-slate-500 dark:text-slate-400 font-bold border-b border-slate-100 dark:border-slate-800">
             <tr>
               <th className="px-6 py-3.5">Type</th>
               <th className="px-6 py-3.5">Patient</th>
-              <th className="px-6 py-3.5">Airtel Inbound</th>
+              <th className="px-6 py-3.5 hidden md:table-cell">Airtel Inbound</th>
               <th className="px-6 py-3.5">Service</th>
               <th className="px-6 py-3.5">Started At</th>
-              <th className="px-6 py-3.5">Duration</th>
+              <th className="px-6 py-3.5 hidden sm:table-cell">Duration</th>
               <th className="px-6 py-3.5">Status</th>
-              <th className="px-6 py-3.5">Recording</th>
+              <th className="px-6 py-3.5 hidden lg:table-cell">Recording</th>
               <th className="px-6 py-3.5 text-right">Actions</th>
             </tr>
           </thead>
@@ -63,7 +63,7 @@ export function CallsTable({ calls, onViewDetails }: CallsTableProps) {
                       </span>
                     </div>
                   </td>
-                  <td className="px-6 py-4 font-semibold text-slate-600 dark:text-slate-400">
+                  <td className="px-6 py-4 font-semibold text-slate-600 dark:text-slate-400 hidden md:table-cell">
                     {formatPhoneNumber(call.incoming_number)}
                   </td>
                   <td className="px-6 py-4 font-medium">
@@ -72,7 +72,7 @@ export function CallsTable({ calls, onViewDetails }: CallsTableProps) {
                   <td className="px-6 py-4 text-slate-500 dark:text-slate-400 font-semibold">
                     {formatDate(call.call_started_at)}
                   </td>
-                  <td className="px-6 py-4 font-bold text-slate-600 dark:text-slate-350">
+                  <td className="px-6 py-4 font-bold text-slate-600 dark:text-slate-350 hidden sm:table-cell">
                     {formatDuration(call.call_duration)}
                   </td>
                   <td className="px-6 py-4">
@@ -80,7 +80,7 @@ export function CallsTable({ calls, onViewDetails }: CallsTableProps) {
                       {getCallStatusLabel(call.call_status)}
                     </Badge>
                   </td>
-                  <td className="px-6 py-4">
+                  <td className="px-6 py-4 hidden lg:table-cell">
                     <CallRecordingPlayer recordingUrl={call.recording_url} variant="compact" />
                   </td>
                   <td className="px-6 py-4 text-right">

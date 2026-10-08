@@ -70,7 +70,7 @@ export function MissedCallsTable({
     <div className="flex flex-col gap-4">
       {/* Internal tabs — only shown in standalone (uncontrolled) mode */}
       {!isControlled && (
-        <div className="flex border-b border-slate-200 dark:border-slate-800 gap-6">
+        <div className="flex border-b border-slate-200 dark:border-slate-800 gap-6 overflow-x-auto flex-nowrap">
           {(['pending', 'resolved', 'all'] as const).map((tab) => (
             <button
               key={tab}
@@ -99,7 +99,7 @@ export function MissedCallsTable({
 
       {/* Table */}
       <div className="border border-slate-800/60 rounded-xl overflow-hidden bg-slate-900/60 shadow-sm">
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto w-full">
           <table className="w-full border-collapse text-left text-xs">
             <thead className="bg-slate-800/40 text-slate-500 font-bold border-b border-slate-800">
               <tr>
@@ -112,7 +112,7 @@ export function MissedCallsTable({
                 <th className="px-6 py-3.5">Service Type</th>
                 <th className="px-6 py-3.5">Missed At</th>
                 <th className="px-6 py-3.5">Status</th>
-                <th className="px-6 py-3.5">Patient Response</th>
+                <th className="px-6 py-3.5 hidden md:table-cell">Patient Response</th>
                 <th className="px-6 py-3.5 text-right">Actions</th>
               </tr>
             </thead>
@@ -188,7 +188,7 @@ export function MissedCallsTable({
                       </td>
 
                       {/* Patient reply */}
-                      <td className="px-6 py-4 max-w-[200px] truncate italic font-semibold text-slate-400">
+                      <td className="px-6 py-4 max-w-[200px] truncate italic font-semibold text-slate-400 hidden md:table-cell">
                         {mc.patient_reply_text ? (
                           `"${mc.patient_reply_text}"`
                         ) : (

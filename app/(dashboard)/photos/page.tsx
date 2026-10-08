@@ -116,7 +116,7 @@ export default function PhotosPage() {
       {selectedPatientId && (
         <div className="flex flex-col gap-6">
           {/* Tab bar */}
-          <div className="flex border-b border-slate-200 dark:border-slate-800 gap-6">
+          <div className="flex border-b border-slate-200 dark:border-slate-800 gap-6 overflow-x-auto flex-nowrap">
             <button
               onClick={() => setActiveTab('compare')}
               className={`py-3 text-xs font-extrabold flex items-center gap-1.5 border-b-2 transition-all focus:outline-none ${

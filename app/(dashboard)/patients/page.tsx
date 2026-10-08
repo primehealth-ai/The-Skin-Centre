@@ -31,7 +31,7 @@ export default function PatientsPage() {
   const [fullName, setFullName] = useState('')
   const [phone, setPhone] = useState('')
   const [email, setEmail] = useState('')
-  const [gender, setGender] = useState<'male' | 'female' | 'other'>('male')
+  const [gender, setGender] = useState<'male' | 'female' | 'other' | ''>('')
   const [dob, setDob] = useState('')
   const [tags, setTags] = useState('')
   const [notes, setNotes] = useState('')
@@ -86,8 +86,8 @@ export default function PatientsPage() {
       const record: Record<string, unknown> = {
         full_name: fullName,
         phone: normalizedPatientPhone,
-        gender,
       }
+      if (gender) record.gender = gender
       if (email) record.email = email
       if (dob) record.date_of_birth = dob
       if (tagList.length > 0) record.tags = tagList
@@ -106,7 +106,7 @@ export default function PatientsPage() {
       setFullName('')
       setPhone('')
       setEmail('')
-      setGender('male')
+      setGender('')
       setDob('')
       setTags('')
       setNotes('')
@@ -197,23 +197,24 @@ export default function PatientsPage() {
           />
 
           <Input
-            label="Email Address"
+            label="Email Address (Optional)"
             type="email"
             placeholder="e.g. ayush@example.com"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
           />
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-semibold text-slate-700 dark:text-slate-400">
-                Gender
+                Gender <span className="font-normal text-slate-400 dark:text-slate-500">(Optional)</span>
               </label>
               <select
                 value={gender}
-                onChange={(e) => setGender(e.target.value as 'male' | 'female' | 'other')}
+                onChange={(e) => setGender(e.target.value as 'male' | 'female' | 'other' | '')}
                 className="w-full bg-white dark:bg-slate-950 text-sm border border-slate-200 dark:border-slate-800 rounded-lg px-3.5 py-2.5 text-slate-800 dark:text-slate-100 focus:outline-none"
               >
+                <option value="">Select gender</option>
                 <option value="male">Male</option>
                 <option value="female">Female</option>
                 <option value="other">Other</option>
@@ -221,7 +222,7 @@ export default function PatientsPage() {
             </div>
 
             <Input
-              label="Date of Birth"
+              label="Date of Birth (Optional)"
               type="date"
               value={dob}
               onChange={(e) => setDob(e.target.value)}
@@ -229,15 +230,15 @@ export default function PatientsPage() {
           </div>
 
           <Input
-            label="Treatment Tags (comma separated)"
-            placeholder="e.g. Botox, Laser, Peel"
+            label="Treatment Tags (Optional)"
+            placeholder="e.g. Botox, Laser, Peel (comma separated)"
             value={tags}
             onChange={(e) => setTags(e.target.value)}
           />
 
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-semibold text-slate-700 dark:text-slate-400">
-              Clinical / Assessment Notes
+              Clinical / Assessment Notes <span className="font-normal text-slate-400 dark:text-slate-500">(Optional)</span>
             </label>
             <textarea
               placeholder="e.g. Sensitive skin, historical acne peels..."

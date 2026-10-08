@@ -272,7 +272,7 @@ export default async function DashboardPage() {
                 <Zap size={14} className="text-amber-500" />
                 Quick Actions
               </h2>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {[
                   { href: '/patients', icon: <Users size={18} className="text-blue-500" />, label: 'Patients', bg: 'bg-blue-50/50 dark:bg-blue-950/20' },
                   { href: '/dashboard/consent', icon: <Clipboard size={18} className="text-indigo-500" />, label: 'Consents', bg: 'bg-indigo-50/50 dark:bg-indigo-950/20' },

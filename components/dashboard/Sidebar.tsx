@@ -2,7 +2,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
-  LayoutDashboard, Phone, PhoneMissed,
+  LayoutDashboard, BarChart2, Phone, PhoneMissed,
   MessageSquare, Users, FileText,
   Camera, LogOut
 } from 'lucide-react'
@@ -12,6 +12,7 @@ import { useRef } from 'react'
 
 const navItems = [
   { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+  { href: '/analytics', icon: BarChart2, label: 'Analytics' },
   { href: '/calls', icon: Phone, label: 'All Calls' },
   { href: '/missed-calls', icon: PhoneMissed, label: 'Missed Calls' },
   { href: '/whatsapp', icon: MessageSquare, label: 'WhatsApp' },

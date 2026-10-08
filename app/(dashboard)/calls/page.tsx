@@ -302,7 +302,7 @@ function FilterBar({
 
       {/* Row 2 — Custom date range picker */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
-        <div className="flex items-center gap-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-1.5">
+        <div className="flex items-center flex-wrap gap-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-1.5">
           <Calendar className="h-3.5 w-3.5 text-slate-400 shrink-0" />
           <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider whitespace-nowrap">From</span>
           <input

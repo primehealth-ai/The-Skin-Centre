@@ -22,6 +22,7 @@ import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Badge } from '@/components/ui/Badge'
+import { Modal } from '@/components/ui/Modal'
 import { normalizePhone } from '@/lib/utils/phone'
 import { formatPhoneNumber } from '@/lib/utils/formatters'
 import { useAuth } from '@/hooks/useAuth'
@@ -111,7 +112,7 @@ function StepIndicator({ currentStep }: { currentStep: number }) {
             </div>
             <span
               className={[
-                'text-[10px] font-bold transition-colors duration-200',
+                'text-[10px] font-bold transition-colors duration-200 hidden sm:block',
                 isActive || isDone ? 'text-slate-900' : 'text-slate-400',
               ].join(' ')}
             >
@@ -163,6 +164,37 @@ function NewConsentPageInner() {
   const [doctorSigEmpty, setDoctorSigEmpty] = useState(true)
   const [witnessSigEmpty, setWitnessSigEmpty] = useState(true)
   const [witnessName, setWitnessName] = useState('')
+
+  // Quick Add Patient state
+  const [isQuickAddOpen, setIsQuickAddOpen] = useState(false)
+  const [quickAddName, setQuickAddName] = useState('')
+  const [quickAddPhone, setQuickAddPhone] = useState('')
+  const [quickAddEmail, setQuickAddEmail] = useState('')
+  const [quickAddGender, setQuickAddGender] = useState<'male' | 'female' | 'other' | ''>('')
+  const [quickAddDob, setQuickAddDob] = useState('')
+  const [quickAddTags, setQuickAddTags] = useState('')
+  const [quickAddNotes, setQuickAddNotes] = useState('')
+  const [quickAddError, setQuickAddError] = useState<string | null>(null)
+  const [quickAddLoading, setQuickAddLoading] = useState(false)
+  const [toastMessage, setToastMessage] = useState<string | null>(null)
+
+  const resetQuickAddForm = useCallback(() => {
+    setQuickAddName('')
+    setQuickAddPhone('')
+    setQuickAddEmail('')
+    setQuickAddGender('')
+    setQuickAddDob('')
+    setQuickAddTags('')
+    setQuickAddNotes('')
+    setQuickAddError(null)
+  }, [])
+
+  const showToast = useCallback((msg: string) => {
+    setToastMessage(msg)
+    setTimeout(() => {
+      setToastMessage(null)
+    }, 4000)
+  }, [])
 
   // Pre-fill witness name once profile is loaded
   useEffect(() => {
@@ -249,6 +281,88 @@ function NewConsentPageInner() {
     }, 300)
     return () => clearTimeout(timer)
   }, [searchQuery, supabase])
+
+  const handleQuickAddSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!quickAddName.trim() || !quickAddPhone.trim()) {
+      setQuickAddError('Full name and phone number are required')
+      return
+    }
+
+    const normalized = normalizePhone(quickAddPhone)
+    if (!normalized) {
+      setQuickAddError('Invalid Indian phone number. Please enter a valid 10-digit number.')
+      return
+    }
+
+    setQuickAddLoading(true)
+    setQuickAddError(null)
+
+    try {
+      // Check if patient with this number already exists
+      const { data: existingPatient } = await supabase
+        .from('patients')
+        .select('id, full_name, phone, gender, date_of_birth')
+        .eq('phone', normalized)
+        .maybeSingle()
+
+      if (existingPatient) {
+        setQuickAddError('Patient with this number already exists')
+        setQuickAddLoading(false)
+        return
+      }
+
+      const payload: Record<string, unknown> = {
+        fullName: quickAddName.trim(),
+        phone: normalized,
+      }
+      if (quickAddEmail.trim()) payload.email = quickAddEmail.trim()
+      if (quickAddGender) payload.gender = quickAddGender
+      if (quickAddDob) payload.dateOfBirth = quickAddDob
+      if (quickAddTags.trim()) payload.tags = quickAddTags.trim()
+      if (quickAddNotes.trim()) payload.notes = quickAddNotes.trim()
+
+      const res = await fetch('/api/patients/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+
+      const data = await res.json()
+      if (!res.ok) {
+        if (
+          res.status === 409 ||
+          data.error?.toLowerCase().includes('already exists') ||
+          data.error?.toLowerCase().includes('duplicate') ||
+          data.error?.includes('23505')
+        ) {
+          setQuickAddError('Patient with this number already exists')
+        } else {
+          setQuickAddError(data.error || 'Failed to create patient')
+        }
+        return
+      }
+
+      const createdPatient: Patient = {
+        id: data.patient.id,
+        full_name: data.patient.full_name,
+        phone: data.patient.phone,
+        gender: data.patient.gender ?? (quickAddGender || null),
+        date_of_birth: data.patient.date_of_birth ?? (quickAddDob || null),
+      }
+
+      setPatient(createdPatient)
+      setIsQuickAddOpen(false)
+      resetQuickAddForm()
+      setSearchQuery('')
+      setSearchResults([])
+      showToast('Patient added successfully!')
+    } catch (err: unknown) {
+      setQuickAddError(err instanceof Error ? err.message : 'Failed to create patient')
+    } finally {
+      setQuickAddLoading(false)
+    }
+  }
 
   // Reset scroll enforcement on entering Step 3; auto-enable if content fits
   useEffect(() => {
@@ -512,9 +626,23 @@ function NewConsentPageInner() {
           {/* ── STEP 1: Select Template / Patient ───────────────────────────── */}
           {step === 1 && (
             <div className="animate-in fade-in slide-in-from-right-4 duration-300">
-              <h2 className="text-sm font-extrabold text-slate-800 dark:text-slate-100 mb-4">
-                1. Select Patient
-              </h2>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-sm font-extrabold text-slate-800 dark:text-slate-100">
+                  1. Select Patient
+                </h2>
+                {patient && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      resetQuickAddForm()
+                      setIsQuickAddOpen(true)
+                    }}
+                    className="text-xs font-bold text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 transition-colors"
+                  >
+                    + Add New Patient
+                  </button>
+                )}
+              </div>
 
               {patient ? (
                 <div className="mb-6 p-4 bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900/30 rounded-xl flex items-center gap-3">
@@ -530,12 +658,31 @@ function NewConsentPageInner() {
                     </p>
                   </div>
                   <Badge variant="primary">Selected</Badge>
+                  <button
+                    type="button"
+                    onClick={() => setPatient(null)}
+                    className="text-xs font-semibold text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 underline ml-2"
+                  >
+                    Change
+                  </button>
                 </div>
               ) : (
                 <div className="mb-6">
-                  <label className="text-xs font-bold text-slate-700 dark:text-slate-400 uppercase tracking-wider mb-2 block">
-                    Search patient by name or phone
-                  </label>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="text-xs font-bold text-slate-700 dark:text-slate-400 uppercase tracking-wider block">
+                      Search patient by name or phone
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        resetQuickAddForm()
+                        setIsQuickAddOpen(true)
+                      }}
+                      className="text-xs font-bold text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 transition-colors"
+                    >
+                      + Add New Patient
+                    </button>
+                  </div>
                   <div className="relative">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
                     <Input
@@ -985,6 +1132,126 @@ function NewConsentPageInner() {
             </div>
           )}
         </div>
+
+        {/* Quick Add Patient Modal */}
+        <Modal
+          isOpen={isQuickAddOpen}
+          onClose={() => {
+            setIsQuickAddOpen(false)
+            resetQuickAddForm()
+          }}
+          title="Quick Add Patient"
+          size="md"
+        >
+          <form onSubmit={handleQuickAddSubmit} className="flex flex-col gap-4">
+            {quickAddError && (
+              <div className="p-3 bg-rose-50 dark:bg-rose-950/20 border border-rose-100 dark:border-rose-900/30 text-rose-600 dark:text-rose-400 text-xs font-bold rounded-xl flex items-center gap-2">
+                <AlertCircle className="h-4 w-4 shrink-0" />
+                <span>{quickAddError}</span>
+              </div>
+            )}
+
+            <Input
+              label="Full Patient Name"
+              placeholder="e.g. Ayush Kumar"
+              value={quickAddName}
+              onChange={(e) => setQuickAddName(e.target.value)}
+              required
+            />
+
+            <Input
+              label="Phone Number"
+              type="tel"
+              placeholder="e.g. 9999999999"
+              value={quickAddPhone}
+              onChange={(e) => setQuickAddPhone(e.target.value)}
+              required
+              helperText="Indian mobile number (10 digits)"
+            />
+
+            <Input
+              label="Email Address (Optional)"
+              type="email"
+              placeholder="e.g. ayush@example.com"
+              value={quickAddEmail}
+              onChange={(e) => setQuickAddEmail(e.target.value)}
+            />
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-semibold text-slate-700 dark:text-slate-400">
+                  Gender <span className="font-normal text-slate-400 dark:text-slate-500">(Optional)</span>
+                </label>
+                <select
+                  value={quickAddGender}
+                  onChange={(e) => setQuickAddGender(e.target.value as 'male' | 'female' | 'other' | '')}
+                  className="w-full bg-white dark:bg-slate-950 text-sm border border-slate-200 dark:border-slate-800 rounded-lg px-3.5 py-2.5 text-slate-800 dark:text-slate-100 focus:outline-none"
+                >
+                  <option value="">Select gender</option>
+                  <option value="male">Male</option>
+                  <option value="female">Female</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+
+              <Input
+                label="Date of Birth (Optional)"
+                type="date"
+                value={quickAddDob}
+                onChange={(e) => setQuickAddDob(e.target.value)}
+              />
+            </div>
+
+            <Input
+              label="Treatment Tags (Optional)"
+              placeholder="e.g. Botox, Laser, Peel (comma separated)"
+              value={quickAddTags}
+              onChange={(e) => setQuickAddTags(e.target.value)}
+            />
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-semibold text-slate-700 dark:text-slate-400">
+                Clinical / Assessment Notes <span className="font-normal text-slate-400 dark:text-slate-500">(Optional)</span>
+              </label>
+              <textarea
+                placeholder="e.g. Sensitive skin, historical acne peels..."
+                value={quickAddNotes}
+                onChange={(e) => setQuickAddNotes(e.target.value)}
+                rows={3}
+                className="w-full bg-white dark:bg-slate-950 text-sm border border-slate-200 dark:border-slate-800 rounded-lg px-3.5 py-2 text-slate-800 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+              />
+            </div>
+
+            <div className="flex justify-end gap-3 border-t border-slate-100 dark:border-slate-800 pt-4 mt-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setIsQuickAddOpen(false)
+                  resetQuickAddForm()
+                }}
+                className="font-bold text-xs py-2 px-4"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                isLoading={quickAddLoading}
+                className="font-bold text-xs py-2 px-4"
+              >
+                Add Patient
+              </Button>
+            </div>
+          </form>
+        </Modal>
+
+        {/* Success toast */}
+        {toastMessage && (
+          <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-3 bg-emerald-600 text-white shadow-xl rounded-xl text-xs font-bold animate-in fade-in slide-in-from-bottom-2">
+            <Check className="h-4 w-4 shrink-0" />
+            <span>{toastMessage}</span>
+          </div>
+        )}
       </div>
     </div>
   )

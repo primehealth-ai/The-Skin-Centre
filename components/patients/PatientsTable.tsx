@@ -52,7 +52,7 @@ export function PatientsTable({ patients, onViewDetails, onEditPatient, onAddPat
     <div className="flex flex-col gap-4">
       {/* Search and Filters */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-slate-50 dark:bg-slate-900/60 p-4 rounded-xl border border-slate-200/60 dark:border-slate-800">
-        <div className="flex items-center gap-3 w-full sm:w-auto">
+        <div className="flex items-center flex-wrap gap-2 w-full sm:w-auto">
           <div className="relative w-full sm:w-64">
             <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
             <input
@@ -94,16 +94,16 @@ export function PatientsTable({ patients, onViewDetails, onEditPatient, onAddPat
 
       {/* Grid Table */}
       <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden bg-white dark:bg-slate-900 shadow-sm">
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto w-full">
           <table className="w-full border-collapse text-left text-xs">
             <thead className="bg-slate-50 dark:bg-slate-800/40 text-slate-500 dark:text-slate-400 font-bold border-b border-slate-100 dark:border-slate-800">
               <tr>
                 <th className="px-6 py-3.5">Name</th>
                 <th className="px-6 py-3.5">Phone Number</th>
-                <th className="px-6 py-3.5">Gender</th>
-                <th className="px-6 py-3.5">Date of Birth</th>
-                <th className="px-6 py-3.5">Treatment Tags</th>
-                <th className="px-6 py-3.5">Registered</th>
+                <th className="px-6 py-3.5 hidden sm:table-cell">Gender</th>
+                <th className="px-6 py-3.5 hidden sm:table-cell">Date of Birth</th>
+                <th className="px-6 py-3.5 hidden md:table-cell">Treatment Tags</th>
+                <th className="px-6 py-3.5 hidden md:table-cell">Registered</th>
                 <th className="px-6 py-3.5 text-right">Actions</th>
               </tr>
             </thead>
@@ -123,13 +123,13 @@ export function PatientsTable({ patients, onViewDetails, onEditPatient, onAddPat
                     <td className="px-6 py-4 font-semibold">
                       {formatPhoneNumber(patient.phone)}
                     </td>
-                    <td className="px-6 py-4 capitalize font-semibold">
+                    <td className="px-6 py-4 capitalize font-semibold hidden sm:table-cell">
                       {patient.gender || 'N/A'}
                     </td>
-                    <td className="px-6 py-4 font-bold text-slate-500 dark:text-slate-400">
+                    <td className="px-6 py-4 font-bold text-slate-500 dark:text-slate-400 hidden sm:table-cell">
                       {patient.date_of_birth || 'N/A'}
                     </td>
-                    <td className="px-6 py-4">
+                    <td className="px-6 py-4 hidden md:table-cell">
                       <div className="flex flex-wrap gap-1">
                         {patient.tags && patient.tags.length > 0 ? (
                           patient.tags.map((tag) => (
@@ -145,7 +145,7 @@ export function PatientsTable({ patients, onViewDetails, onEditPatient, onAddPat
                         )}
                       </div>
                     </td>
-                    <td className="px-6 py-4 text-slate-500 dark:text-slate-400 font-semibold">
+                    <td className="px-6 py-4 text-slate-500 dark:text-slate-400 font-semibold hidden md:table-cell">
                       {new Date(patient.created_at).toLocaleDateString('en-IN', {
                         timeZone: 'Asia/Kolkata',
                         day: 'numeric',

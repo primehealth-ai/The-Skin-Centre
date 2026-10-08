@@ -28,7 +28,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     // 2. Parse body
     const body = await req.json()
-    const { fullName, phone, email, dateOfBirth } = body
+    const { fullName, phone, email, dateOfBirth, gender, tags, notes, internal_notes } = body
 
     if (!fullName || !phone) {
       return NextResponse.json({ error: 'Missing fullName or phone' }, { status: 400 })
@@ -50,12 +50,23 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
     if (email) record.email = email
     if (dateOfBirth) record.date_of_birth = dateOfBirth
+    if (gender) record.gender = gender
+    if (tags) {
+      const tagList = Array.isArray(tags)
+        ? tags
+        : typeof tags === 'string'
+        ? tags.split(',').map((t: string) => t.trim()).filter((t: string) => t !== '')
+        : []
+      if (tagList.length > 0) record.tags = tagList
+    }
+    const noteText = notes || internal_notes
+    if (noteText) record.internal_notes = noteText
 
     const supabase = createServiceClient()
     const { data: patient, error: insertError } = await supabase
       .from('patients')
       .upsert(record, { onConflict: 'phone', ignoreDuplicates: false })
-      .select('id, full_name, phone')
+      .select('id, full_name, phone, gender, date_of_birth')
       .single()
 
     if (insertError || !patient) {
