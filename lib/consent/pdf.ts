@@ -456,13 +456,13 @@ function buildDynamicFields(template: ConsentTemplate, filledFields: ConsentPDFP
         key: `${field.key}-header`,
         style: {
           flexDirection: 'row' as const,
-          backgroundColor: '#1e293b',
+          backgroundColor: '#f1f5f9',
           padding: '6px 10px',
         },
       },
-      h(Text, { style: { flex: 1, fontSize: 8, color: '#94a3b8', fontWeight: 'bold' } }, 'Risk Factor / Condition'),
-      h(Text, { style: { width: 30, fontSize: 8, color: '#94a3b8', fontWeight: 'bold', textAlign: 'center' as const } }, 'Yes'),
-      h(Text, { style: { width: 30, fontSize: 8, color: '#94a3b8', fontWeight: 'bold', textAlign: 'center' as const } }, 'No')
+      h(Text, { style: { flex: 1, fontSize: 8, color: '#475569', fontWeight: 'bold' } }, 'Risk Factor / Condition'),
+      h(Text, { style: { width: 30, fontSize: 8, color: '#475569', fontWeight: 'bold', textAlign: 'center' as const } }, 'Yes'),
+      h(Text, { style: { width: 30, fontSize: 8, color: '#475569', fontWeight: 'bold', textAlign: 'center' as const } }, 'No')
     )
 
     const dataRows = (field.rows ?? []).map((rowLabel, index) => {
@@ -474,11 +474,11 @@ function buildDynamicFields(template: ConsentTemplate, filledFields: ConsentPDFP
           style: {
             flexDirection: 'row' as const,
             padding: '5px 10px',
-            backgroundColor: index % 2 === 0 ? '#0f172a' : '#1e293b',
-            borderTop: '1px solid #334155',
+            backgroundColor: index % 2 === 0 ? '#f8fafc' : '#ffffff',
+            borderTop: '1px solid #e2e8f0',
           },
         },
-        h(Text, { style: { flex: 1, fontSize: 8, color: '#e2e8f0' } }, rowLabel),
+        h(Text, { style: { flex: 1, fontSize: 8, color: '#1e293b' } }, rowLabel),
         h(
           Text,
           {
@@ -486,7 +486,7 @@ function buildDynamicFields(template: ConsentTemplate, filledFields: ConsentPDFP
               width: 30,
               textAlign: 'center' as const,
               fontSize: 9,
-              color: val === 'Yes' ? '#10b981' : '#475569',
+              color: val === 'Yes' ? '#16a34a' : '#94a3b8',
             },
           },
           val === 'Yes' ? '✓' : '—'
@@ -498,7 +498,7 @@ function buildDynamicFields(template: ConsentTemplate, filledFields: ConsentPDFP
               width: 30,
               textAlign: 'center' as const,
               fontSize: 9,
-              color: val === 'No' ? '#f43f5e' : '#475569',
+              color: val === 'No' ? '#dc2626' : '#94a3b8',
             },
           },
           val === 'No' ? '✓' : '—'
@@ -510,12 +510,12 @@ function buildDynamicFields(template: ConsentTemplate, filledFields: ConsentPDFP
       h(
         View,
         { key: `${field.key}-section`, style: { marginBottom: 12 } },
-        h(Text, { style: { fontSize: 10, fontWeight: 'bold', marginBottom: 4, color: '#94a3b8' } }, field.label),
+        h(Text, { style: { fontSize: 10, fontWeight: 'bold', marginBottom: 4, color: '#475569' } }, field.label),
         h(
           View,
           {
             style: {
-              border: '1px solid #334155',
+              border: '1px solid #e2e8f0',
               borderRadius: 4,
               overflow: 'hidden',
             },

@@ -832,11 +832,11 @@ function NewConsentPageInner() {
                           <div>
                             <div className="border border-slate-700 rounded-xl overflow-hidden w-full">
                               <table className="text-sm w-full border-collapse">
-                                <thead className="bg-slate-800 text-slate-300 text-xs font-bold uppercase tracking-wider">
-                                  <tr>
-                                    <th className="text-left px-4 py-2.5 font-bold">Risk Factor / Condition</th>
-                                    <th className="text-center px-3 py-2.5 font-bold w-16">Yes</th>
-                                    <th className="text-center px-3 py-2.5 font-bold w-16">No</th>
+                                <thead>
+                                  <tr className="bg-slate-800 text-slate-300">
+                                    <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider w-full">Risk Factor / Condition</th>
+                                    <th className="px-4 py-3 text-center text-xs font-bold uppercase tracking-wider w-16">Yes</th>
+                                    <th className="px-4 py-3 text-center text-xs font-bold uppercase tracking-wider w-16">No</th>
                                   </tr>
                                 </thead>
                                 <tbody>
@@ -846,34 +846,30 @@ function NewConsentPageInner() {
                                       className={index % 2 === 0 ? 'bg-slate-900/40' : ''}
                                     >
                                       <td className="px-4 py-2.5 text-sm text-slate-200">{rowLabel}</td>
-                                      <td className="text-center px-3 py-2.5">
+                                      <td className="px-4 py-3 text-center">
                                         <input
                                           type="radio"
-                                          name={field.key + '_' + index}
+                                          name={`${field.key}_${index}`}
                                           value="Yes"
-                                          checked={consentData[field.key + '_' + index] === 'Yes'}
-                                          onChange={() =>
-                                            setConsentData((prev) => ({
-                                              ...prev,
-                                              [field.key + '_' + index]: 'Yes',
-                                            }))
-                                          }
-                                          className="w-4 h-4 accent-blue-500 cursor-pointer"
+                                          checked={consentData[`${field.key}_${index}`] === 'Yes'}
+                                          onChange={() => setConsentData((prev: Record<string, string | boolean>) => ({
+                                            ...prev,
+                                            [`${field.key}_${index}`]: 'Yes'
+                                          }))}
+                                          className="w-4 h-4 accent-emerald-500 cursor-pointer"
                                         />
                                       </td>
-                                      <td className="text-center px-3 py-2.5">
+                                      <td className="px-4 py-3 text-center">
                                         <input
                                           type="radio"
-                                          name={field.key + '_' + index}
+                                          name={`${field.key}_${index}`}
                                           value="No"
-                                          checked={consentData[field.key + '_' + index] === 'No'}
-                                          onChange={() =>
-                                            setConsentData((prev) => ({
-                                              ...prev,
-                                              [field.key + '_' + index]: 'No',
-                                            }))
-                                          }
-                                          className="w-4 h-4 accent-blue-500 cursor-pointer"
+                                          checked={consentData[`${field.key}_${index}`] === 'No'}
+                                          onChange={() => setConsentData((prev: Record<string, string | boolean>) => ({
+                                            ...prev,
+                                            [`${field.key}_${index}`]: 'No'
+                                          }))}
+                                          className="w-4 h-4 accent-rose-500 cursor-pointer"
                                         />
                                       </td>
                                     </tr>
