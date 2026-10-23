@@ -4,13 +4,14 @@ export type ConsentSection = {
   is_warning?: boolean
 }
 
-export type ConsentDynamicFieldType = 'text' | 'select' | 'textarea'
+export type ConsentDynamicFieldType = 'text' | 'select' | 'textarea' | 'checkbox_group'
 
 export type ConsentDynamicField = {
   key: string
   label: string
   type: ConsentDynamicFieldType
-  options?: string[]
+  options?: string[]        // existing — keep
+  rows?: string[]           // NEW — for checkbox_group: array of row labels
   required?: boolean
 }
 

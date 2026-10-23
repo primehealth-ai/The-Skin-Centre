@@ -402,11 +402,20 @@ function buildInfoBox(
 
 function buildDynamicFields(template: ConsentTemplate, filledFields: ConsentPDFParams['filledFields']) {
   if (!template.dynamic_fields || template.dynamic_fields.length === 0) return null
-  const rows: React.ReactElement[] = []
-  for (let i = 0; i < template.dynamic_fields.length; i += 2) {
-    const f1 = template.dynamic_fields[i]
-    const f2 = template.dynamic_fields[i + 1]
-    rows.push(
+
+  const elements: React.ReactElement[] = []
+
+  // Separate checkbox_group fields from regular fields
+  // Regular fields are rendered in pairs (2-column); checkbox_group fields are rendered full-width
+  const regularFields = template.dynamic_fields.filter((f) => f.type !== 'checkbox_group')
+  const checkboxGroupFields = template.dynamic_fields.filter((f) => f.type === 'checkbox_group')
+
+  // Build regular field rows (2-column layout)
+  const regularRows: React.ReactElement[] = []
+  for (let i = 0; i < regularFields.length; i += 2) {
+    const f1 = regularFields[i]
+    const f2 = regularFields[i + 1]
+    regularRows.push(
       h(
         View,
         { style: styles.tableRow, key: `row-${i}` },
@@ -427,13 +436,102 @@ function buildDynamicFields(template: ConsentTemplate, filledFields: ConsentPDFP
       )
     )
   }
-  return h(
-    View,
-    { style: { marginBottom: 4 } },
-    h(Text, { style: styles.dynamicTitle }, 'Treatment Specific Information'),
-    h(View, { style: styles.table }, rows)
-  )
+
+  if (regularRows.length > 0) {
+    elements.push(
+      h(
+        View,
+        { style: { marginBottom: 4 }, key: 'regular-fields' },
+        h(Text, { style: styles.dynamicTitle }, 'Treatment Specific Information'),
+        h(View, { style: styles.table }, regularRows)
+      )
+    )
+  }
+
+  // Build checkbox_group screening tables
+  for (const field of checkboxGroupFields) {
+    const headerRow = h(
+      View,
+      {
+        key: `${field.key}-header`,
+        style: {
+          flexDirection: 'row' as const,
+          backgroundColor: '#1e293b',
+          padding: '6px 10px',
+        },
+      },
+      h(Text, { style: { flex: 1, fontSize: 8, color: '#94a3b8', fontWeight: 'bold' } }, 'Risk Factor / Condition'),
+      h(Text, { style: { width: 30, fontSize: 8, color: '#94a3b8', fontWeight: 'bold', textAlign: 'center' as const } }, 'Yes'),
+      h(Text, { style: { width: 30, fontSize: 8, color: '#94a3b8', fontWeight: 'bold', textAlign: 'center' as const } }, 'No')
+    )
+
+    const dataRows = (field.rows ?? []).map((rowLabel, index) => {
+      const val = filledFields[field.key + '_' + index]
+      return h(
+        View,
+        {
+          key: `${field.key}-row-${index}`,
+          style: {
+            flexDirection: 'row' as const,
+            padding: '5px 10px',
+            backgroundColor: index % 2 === 0 ? '#0f172a' : '#1e293b',
+            borderTop: '1px solid #334155',
+          },
+        },
+        h(Text, { style: { flex: 1, fontSize: 8, color: '#e2e8f0' } }, rowLabel),
+        h(
+          Text,
+          {
+            style: {
+              width: 30,
+              textAlign: 'center' as const,
+              fontSize: 9,
+              color: val === 'Yes' ? '#10b981' : '#475569',
+            },
+          },
+          val === 'Yes' ? '✓' : '—'
+        ),
+        h(
+          Text,
+          {
+            style: {
+              width: 30,
+              textAlign: 'center' as const,
+              fontSize: 9,
+              color: val === 'No' ? '#f43f5e' : '#475569',
+            },
+          },
+          val === 'No' ? '✓' : '—'
+        )
+      )
+    })
+
+    elements.push(
+      h(
+        View,
+        { key: `${field.key}-section`, style: { marginBottom: 12 } },
+        h(Text, { style: { fontSize: 10, fontWeight: 'bold', marginBottom: 4, color: '#94a3b8' } }, field.label),
+        h(
+          View,
+          {
+            style: {
+              border: '1px solid #334155',
+              borderRadius: 4,
+              overflow: 'hidden',
+            },
+          },
+          headerRow,
+          ...dataRows
+        )
+      )
+    )
+  }
+
+  if (elements.length === 0) return null
+
+  return h(View, { style: { marginBottom: 4 } }, ...elements)
 }
+
 
 function buildConsentSections(template: ConsentTemplate) {
   return template.sections.map((section, index) => {

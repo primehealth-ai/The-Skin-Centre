@@ -8,7 +8,7 @@ import {
 } from 'recharts'
 import {
   Phone, PhoneIncoming, PhoneMissed, MessageSquare, Users,
-  CalendarX, PieChart as PieChartIcon, MessageCircle, Clock,
+  CalendarX, PieChart as PieChartIcon, Clock,
   Calendar, Download, Sparkles, ShieldCheck
 } from 'lucide-react'
 import StatCard from '@/components/dashboard/StatCard'

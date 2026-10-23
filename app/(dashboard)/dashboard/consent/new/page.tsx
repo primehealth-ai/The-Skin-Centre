@@ -401,9 +401,18 @@ function NewConsentPageInner() {
     if (!selectedTemplate) return false
     for (const field of selectedTemplate.dynamic_fields ?? []) {
       if (field.required) {
-        const value = consentData[field.key]
-        if (value === undefined || value === null || value === '') {
-          return false
+        if (field.type === 'checkbox_group') {
+          const allAnswered = (field.rows ?? []).every(
+            (_, i) =>
+              consentData[field.key + '_' + i] !== undefined &&
+              consentData[field.key + '_' + i] !== ''
+          )
+          if (!allAnswered) return false
+        } else {
+          const value = consentData[field.key]
+          if (value === undefined || value === null || value === '') {
+            return false
+          }
         }
       }
     }
@@ -808,6 +817,78 @@ function NewConsentPageInner() {
                           </option>
                         ))}
                       </select>
+                    ) : field.type === 'checkbox_group' ? (
+                      (() => {
+                        const allAnswered = field.required
+                          ? (field.rows ?? []).every(
+                              (_, i) => consentData[field.key + '_' + i] !== undefined && consentData[field.key + '_' + i] !== ''
+                            )
+                          : true
+                        const showError = field.required && !allAnswered &&
+                          (field.rows ?? []).some(
+                            (_, i) => consentData[field.key + '_' + i] !== undefined && consentData[field.key + '_' + i] !== ''
+                          )
+                        return (
+                          <div>
+                            <div className="border border-slate-700 rounded-xl overflow-hidden w-full">
+                              <table className="text-sm w-full border-collapse">
+                                <thead className="bg-slate-800 text-slate-300 text-xs font-bold uppercase tracking-wider">
+                                  <tr>
+                                    <th className="text-left px-4 py-2.5 font-bold">Risk Factor / Condition</th>
+                                    <th className="text-center px-3 py-2.5 font-bold w-16">Yes</th>
+                                    <th className="text-center px-3 py-2.5 font-bold w-16">No</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {(field.rows ?? []).map((rowLabel, index) => (
+                                    <tr
+                                      key={index}
+                                      className={index % 2 === 0 ? 'bg-slate-900/40' : ''}
+                                    >
+                                      <td className="px-4 py-2.5 text-sm text-slate-200">{rowLabel}</td>
+                                      <td className="text-center px-3 py-2.5">
+                                        <input
+                                          type="radio"
+                                          name={field.key + '_' + index}
+                                          value="Yes"
+                                          checked={consentData[field.key + '_' + index] === 'Yes'}
+                                          onChange={() =>
+                                            setConsentData((prev) => ({
+                                              ...prev,
+                                              [field.key + '_' + index]: 'Yes',
+                                            }))
+                                          }
+                                          className="w-4 h-4 accent-blue-500 cursor-pointer"
+                                        />
+                                      </td>
+                                      <td className="text-center px-3 py-2.5">
+                                        <input
+                                          type="radio"
+                                          name={field.key + '_' + index}
+                                          value="No"
+                                          checked={consentData[field.key + '_' + index] === 'No'}
+                                          onChange={() =>
+                                            setConsentData((prev) => ({
+                                              ...prev,
+                                              [field.key + '_' + index]: 'No',
+                                            }))
+                                          }
+                                          className="w-4 h-4 accent-blue-500 cursor-pointer"
+                                        />
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                            {showError && (
+                              <p className="text-rose-400 text-xs mt-2">
+                                Please answer all screening questions before proceeding.
+                              </p>
+                            )}
+                          </div>
+                        )
+                      })()
                     ) : (
                       <Input
                         value={String(consentData[field.key] ?? '')}
