@@ -146,9 +146,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const missingFields: string[] = []
     for (const field of template.dynamic_fields ?? []) {
       if (field.required) {
-        const value = consent_data[field.key]
-        if (value === undefined || value === null || value === '') {
-          missingFields.push(field.label)
+        if (field.type === 'checkbox_group' && Array.isArray(field.rows)) {
+          const allAnswered = field.rows.every(
+            (_: string, i: number) => {
+              const val = consent_data[`${field.key}_${i}`]
+              return val === 'Yes' || val === 'No'
+            }
+          )
+          if (!allAnswered) missingFields.push(field.label)
+        } else {
+          const value = consent_data[field.key]
+          if (value === undefined || value === null || value === '') {
+            missingFields.push(field.label)
+          }
         }
       }
     }
