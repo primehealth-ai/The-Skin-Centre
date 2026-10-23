@@ -485,11 +485,12 @@ function buildDynamicFields(template: ConsentTemplate, filledFields: ConsentPDFP
             style: {
               width: 30,
               textAlign: 'center' as const,
-              fontSize: 9,
+              fontSize: 8,
+              fontFamily: 'Helvetica-Bold',
               color: val === 'Yes' ? '#16a34a' : '#94a3b8',
             },
           },
-          val === 'Yes' ? '✓' : '—'
+          val === 'Yes' ? '[Y]' : '-'
         ),
         h(
           Text,
@@ -497,11 +498,12 @@ function buildDynamicFields(template: ConsentTemplate, filledFields: ConsentPDFP
             style: {
               width: 30,
               textAlign: 'center' as const,
-              fontSize: 9,
+              fontSize: 8,
+              fontFamily: 'Helvetica-Bold',
               color: val === 'No' ? '#dc2626' : '#94a3b8',
             },
           },
-          val === 'No' ? '✓' : '—'
+          val === 'No' ? '[N]' : '-'
         )
       )
     })
